@@ -10,7 +10,9 @@ i18n.configure({
   directory: __dirname + "/locales",
 });
 
-if (process.env.NODE_ENV !== "production") {
+const isProduction = process.env.NODE_ENV === "production";
+
+if (!isProduction) {
   require("dotenv").config();
 }
 
@@ -24,7 +26,7 @@ const missingEnv = ["PORT", "BOT_TOKEN", "WEBHOOK_URL"].filter(
 
 const { PORT, BOT_TOKEN, NODE_ENV, WEBHOOK_URL } = process.env;
 
-if (missingEnv.length > 0) {
+if (isProduction && missingEnv.length > 0) {
   console.error("Missing ENV var:", missingEnv.join(", "));
   process.exit(1);
 }
@@ -33,7 +35,7 @@ if (missingEnv.length > 0) {
 
 const bot = new Telegraf(BOT_TOKEN, {
   telegram: {
-    webhookReply: NODE_ENV === "production",
+    webhookReply: isProduction,
   },
 });
 
@@ -43,7 +45,7 @@ bot.hears(/t\.me\//, (ctx, _post) => {
 });
 
 const botOptions =
-  NODE_ENV === "production"
+  isProduction
     ? {
         webhook: {
           domain: WEBHOOK_URL,
