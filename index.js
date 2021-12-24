@@ -39,9 +39,13 @@ const bot = new Telegraf(BOT_TOKEN, {
   },
 });
 
-bot.hears(/t\.me\//, (ctx, _post) => {
+bot.hears(/t\.me\//, (ctx) => {
   console.log(`DELETING: ${ctx.message.message_id} ${ctx.message.text}`);
-  ctx.deleteMessage(ctx.message.message_id);
+  ctx.deleteMessage(ctx.message.message_id).catch((e) => console.log("CANT DELETE:", ctx.message, e));
+});
+
+bot.on("message", (ctx, _post) => {
+  console.log(`${ctx.message}`);
 });
 
 const botOptions =
