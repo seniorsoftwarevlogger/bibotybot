@@ -1,6 +1,7 @@
 const { Telegraf } = require("telegraf");
 const i18n = require("i18n");
 const Sentry = require("@sentry/node");
+const { update } = require("lodash");
 
 // Setup =======================================================================
 
@@ -40,6 +41,10 @@ const bot = new Telegraf(BOT_TOKEN, {
 });
 
 const deletedMessages = [];
+
+bot.on('message', (ctx) => {
+  console.log(ctx.message);
+})
 
 bot.hears(/t\.me\//, (ctx) => {
   console.log(`DELETING: ${ctx.message.message_id} ${ctx.message.text}`);
