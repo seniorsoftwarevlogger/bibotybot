@@ -42,17 +42,26 @@ const bot = new Telegraf(BOT_TOKEN, {
 
 const deletedMessages = [];
 
-bot.on('message', (ctx) => {
-  console.log(ctx.message);
-})
+function isChannelBot(ctx) {
+  return ctx.message.from.first_name === "Telegram"
+}
+function hasTelegramLink(ctx) {
+  return ctx.message.from != "Channel" && ctx.message.text.includes("t.me")
+}
 
-bot.hears(/t\.me\//, (ctx) => {
-  console.log(`DELETING: ${ctx.message.message_id} ${ctx.message.text}`);
-  
-  ctx.deleteMessage(ctx.message.message_id)
-    .then(() => deletedMessages.push(ctx.message.message_id))
-    .catch((e) => console.log("CANT DELETE:", ctx.message, e));
-});
+const spamChecks = [isChannelBot, hasTelegramLink];
+
+bot.on('message', (ctx) => {
+  console.log(ctx.message.from);
+
+  if (spamChecks.any((check) => check(ctx))) {
+    console.log(`DELETING: ${ctx.message.message_id} ${ctx.message.text}`);
+
+    ctx.deleteMessage(ctx.message.message_id)
+      .then(() => deletedMessages.push(ctx.message.message_id))
+      .catch((e) => console.log("CANT DELETE:", ctx.message, e));
+  }
+})
 
 setInterval(() => {
   bot.telegram.sendMessage("@soexpired", `${deletedMessages.splice(0).length} messages deleted`)
