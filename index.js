@@ -54,7 +54,7 @@ const spamChecks = [isChannelBot, hasTelegramLink];
 bot.on('message', (ctx) => {
   console.log(ctx.message.from);
 
-  if (spamChecks.any((check) => check(ctx))) {
+  if (spamChecks.some((check) => check(ctx))) {
     console.log(`DELETING: ${ctx.message.message_id} ${ctx.message.text}`);
 
     ctx.deleteMessage(ctx.message.message_id)
