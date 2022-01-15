@@ -43,10 +43,10 @@ const bot = new Telegraf(BOT_TOKEN, {
 const deletedMessages = [];
 
 function isChannelBot(ctx) {
-  return ctx.message.from.first_name === "Telegram"
+  return ctx.message.from.first_name === "Channel"
 }
 function hasTelegramLink(ctx) {
-  return ctx.message.from != "Channel" && ctx.message.text.includes("t.me")
+  return ctx.message.text.includes("t.me")
 }
 
 const spamChecks = [isChannelBot, hasTelegramLink];
