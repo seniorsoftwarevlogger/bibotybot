@@ -43,7 +43,7 @@ const bot = new Telegraf(BOT_TOKEN, {
 const deletedMessages = [];
 
 function isChannelBot(ctx) {
-  return ctx.message.from.first_name === "Channel"
+  return ctx.message.from.first_name === "Channel" && ctx.message.sender_chat?.username !== "seniorsoftwarevlogger";
 }
 function hasTelegramLink(ctx) {
   return ctx.message.text.includes("t.me")
