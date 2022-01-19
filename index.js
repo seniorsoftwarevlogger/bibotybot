@@ -42,6 +42,9 @@ const bot = new Telegraf(BOT_TOKEN, {
 
 const deletedMessages = [];
 
+function isMe(ctx) {
+  return ctx.message.from.first_name === "Channel" && ctx.message.sender_chat?.username === "seniorsoftwarevlogger";
+}
 function isChannelBot(ctx) {
   return ctx.message.from.first_name === "Channel" && ctx.message.sender_chat?.username !== "seniorsoftwarevlogger";
 }
@@ -54,7 +57,7 @@ const spamChecks = [isChannelBot, hasTelegramLink];
 bot.on('message', (ctx) => {
   console.log(ctx.message.from);
 
-  if (spamChecks.some((check) => check(ctx))) {
+  if (!isMe(ctx) && spamChecks.some((check) => check(ctx))) {
     console.log(`DELETING: ${ctx.message.message_id} ${ctx.message.text}`);
 
     ctx.deleteMessage(ctx.message.message_id)
