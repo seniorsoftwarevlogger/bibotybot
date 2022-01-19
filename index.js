@@ -46,7 +46,7 @@ function isChannelBot(ctx) {
   return ctx.message.from.first_name === "Channel" && ctx.message.sender_chat?.username !== "seniorsoftwarevlogger";
 }
 function hasTelegramLink(ctx) {
-  return ctx.message.text.includes("t.me")
+  return ctx.message.text?.includes("t.me")
 }
 
 const spamChecks = [isChannelBot, hasTelegramLink];
