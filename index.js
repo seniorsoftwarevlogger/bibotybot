@@ -21,11 +21,11 @@ if (process.env.SENTRY_DSN) {
   Sentry.init({ dsn: process.env.SENTRY_DSN });
 }
 
-const missingEnv = ["PORT", "BOT_TOKEN", "WEBHOOK_URL"].filter(
+const missingEnv = ["ME", "PORT", "BOT_TOKEN", "WEBHOOK_URL"].filter(
   (e) => !process.env[e]
 );
 
-const { PORT, BOT_TOKEN, NODE_ENV, WEBHOOK_URL } = process.env;
+const { ME, PORT, BOT_TOKEN, NODE_ENV, WEBHOOK_URL } = process.env;
 
 if (isProduction && missingEnv.length > 0) {
   console.error("Missing ENV var:", missingEnv.join(", "));
@@ -41,12 +41,13 @@ const bot = new Telegraf(BOT_TOKEN, {
 });
 
 const deletedMessages = [];
+const myChannels = ME.split(",");
 
 function isMe({message}) {
-  return message.from.first_name === "Telegram" || (message.from.first_name === "Channel" && message.sender_chat?.username === "seniorsoftwarevlogger");
+  return message.from.first_name === "Telegram" || (message.from.first_name === "Channel" && myChannels.includes(message.sender_chat?.username));
 }
-function isChannelBot(ctx) {
-  return ctx.message.from.first_name === "Channel" && ctx.message.sender_chat?.username !== "seniorsoftwarevlogger";
+function isChannelBot({message}) {
+  return message.from.first_name === "Channel";
 }
 function hasTelegramLink(ctx) {
   return ctx.message.text?.includes("t.me")
@@ -56,8 +57,10 @@ const spamChecks = [isChannelBot, hasTelegramLink];
 
 bot.on('message', (ctx) => {
   console.log(ctx.message.from);
+  
+  if(isMe(ctx)) return;
 
-  if (!isMe(ctx) && spamChecks.some((check) => check(ctx))) {
+  if (spamChecks.some((check) => check(ctx))) {
     console.log(`DELETING: ${ctx.message.message_id} ${ctx.message.text}`);
 
     ctx.deleteMessage(ctx.message.message_id)
@@ -66,10 +69,11 @@ bot.on('message', (ctx) => {
   }
 })
 
-setInterval(() => {
-  bot.telegram.sendMessage("@soexpired", `${deletedMessages.splice(0).length} messages deleted`)
-    .catch((e) => console.log("CANT SEND MESSAGE:", e));
-}, 1000 * 60 * 60 * 24);
+// TODO: replace name handle with chat id
+// setInterval(() => {
+//  bot.telegram.sendMessage("@soexpired", `${deletedMessages.splice(0).length} messages deleted`)
+//    .catch((e) => console.log("CANT SEND MESSAGE:", e));
+// }, 1000 * 60 * 60 * 24);
 
 const botOptions =
   isProduction
