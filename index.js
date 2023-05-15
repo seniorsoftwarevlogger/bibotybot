@@ -30,7 +30,7 @@ const missingEnv = [
   "FAMILY",
 ].filter((e) => !process.env[e]);
 
-const { ME, PORT, BOT_TOKEN, NODE_ENV, WEBHOOK_URL } = process.env;
+const { ME, PORT, BOT_TOKEN, NODE_ENV, WEBHOOK_URL, ALLOW } = process.env;
 
 if (isProduction && missingEnv.length > 0) {
   console.error("Missing ENV var:", missingEnv.join(", "));
