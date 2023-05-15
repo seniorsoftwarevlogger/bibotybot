@@ -59,7 +59,7 @@ function isMe({ message }) {
   );
 }
 function isAllowList({ message }) {
-  return allowList.includes(message.sender_chat?.username);
+  return message.from?.username && allowList.includes(message.from?.username);
 }
 function isChannelBot({ message }) {
   return message.from.first_name === "Channel";
