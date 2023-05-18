@@ -46,7 +46,6 @@ const bot = new Telegraf(BOT_TOKEN, {
   },
 });
 
-const deletedMessages = [];
 const myChannels = ME.split(",");
 const allowList = ALLOW.split(",");
 const family = FAMILY.split(",");
@@ -71,48 +70,37 @@ function hasTelegramLink(ctx) {
 const spamChecks = [isChannelBot, hasTelegramLink];
 
 bot.on("message", (ctx) => {
-  console.log(ctx.message.from);
+  if (isMe(ctx) || family.includes(ctx.message.from.username)) return;
 
-  // test if message is not text and not from family
-  if (!ctx.message.text && !family.includes(ctx.message.from.username)) {
+  // Delete media messages
+  if (!ctx.message.text) {
     // block user from sending media
-    ctx.restrictChatMember(ctx.message.from.id, {
-      permissions: {
-        can_send_messages: true,
-        can_send_media_messages: false,
-        can_send_polls: false,
-        can_send_other_messages: false,
-        can_add_web_page_previews: false,
-        can_change_info: false,
-        can_invite_users: false,
-        can_pin_messages: false,
-      },
-    });
-
-    ctx
+    return ctx
       .deleteMessage(ctx.message.message_id)
-      .then(() => deletedMessages.push(ctx.message.message_id))
+      .then(() =>
+        ctx.restrictChatMember(ctx.message.from.id, {
+          permissions: {
+            can_send_messages: true,
+            can_send_media_messages: false,
+            can_send_polls: false,
+            can_send_other_messages: false,
+            can_add_web_page_previews: false,
+            can_change_info: false,
+            can_invite_users: false,
+            can_pin_messages: false,
+          },
+        })
+      )
       .catch((e) => console.log("CANT DELETE:", ctx.message, e));
   }
 
-  // test link spam
-  if (isMe(ctx) || isAllowList(ctx)) return;
-
-  if (spamChecks.some((check) => check(ctx))) {
-    console.log(`DELETING: ${ctx.message.message_id} ${ctx.message.text}`);
-
-    ctx
+  // Delete telegram links
+  if (!isAllowList(ctx) && spamChecks.some((check) => check(ctx))) {
+    return ctx
       .deleteMessage(ctx.message.message_id)
-      .then(() => deletedMessages.push(ctx.message.message_id))
       .catch((e) => console.log("CANT DELETE:", ctx.message, e));
   }
 });
-
-// TODO: replace name handle with chat id
-// setInterval(() => {
-//  bot.telegram.sendMessage("@soexpired", `${deletedMessages.splice(0).length} messages deleted`)
-//    .catch((e) => console.log("CANT SEND MESSAGE:", e));
-// }, 1000 * 60 * 60 * 24);
 
 const botOptions = isProduction
   ? {
