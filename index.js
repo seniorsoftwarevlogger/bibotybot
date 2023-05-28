@@ -63,11 +63,12 @@ function isAllowList({ message }) {
 function isChannelBot({ message }) {
   return message.from.first_name === "Channel";
 }
-function hasTelegramLink(ctx) {
-  return ctx.message.text?.includes("t.me");
+function hasLink(ctx) {
+  return ctx.message.entities?.some((entity) => entity.type === "url");
+  // return ctx.message.text?.includes("t.me");
 }
 
-const spamChecks = [isChannelBot, hasTelegramLink];
+const spamChecks = [isChannelBot, hasLink];
 
 bot.on("message", (ctx) => {
   if (isMe(ctx) || family.includes(ctx.message.from.username)) return;
@@ -94,7 +95,7 @@ bot.on("message", (ctx) => {
       .catch((e) => console.log("CANT DELETE:", ctx.message, e));
   }
 
-  // Delete telegram links
+  // Delete links
   if (!isAllowList(ctx) && spamChecks.some((check) => check(ctx))) {
     return ctx
       .deleteMessage(ctx.message.message_id)
