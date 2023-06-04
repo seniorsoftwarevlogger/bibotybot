@@ -17,6 +17,7 @@
     "dotenv": "^8.2.0",
     "googleapis": "^52.1.0",
     "i18n": "^0.10.0",
+    "languagedetect": "^2.0.0",
     "lodash": "^4.17.21",
     "telegraf": "^4.5.2"
   }

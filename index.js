@@ -1,7 +1,8 @@
 const { Telegraf } = require("telegraf");
 const i18n = require("i18n");
 const Sentry = require("@sentry/node");
-const { update } = require("lodash");
+const LanguageDetect = require("languagedetect");
+const lngDetector = new LanguageDetect();
 
 // Setup =======================================================================
 
@@ -100,6 +101,18 @@ bot.on("message", (ctx) => {
     return ctx
       .deleteMessage(ctx.message.message_id)
       .catch((e) => console.log("CANT DELETE:", ctx.message, e));
+  }
+
+  // Delete messages in english
+  try {
+    const lang = lngDetector.detect(ctx.message.text, 1)[0][0];
+    if (lang === "english") {
+      return ctx
+        .deleteMessage(ctx.message.message_id)
+        .catch((e) => console.log("CANT DELETE:", ctx.message, e));
+    }
+  } catch (e) {
+    console.log("CANT DETECT LANGUAGE:", ctx.message, e);
   }
 });
 
