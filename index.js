@@ -79,7 +79,8 @@ bot.on("message", (ctx) => {
     // block user from sending media
     return ctx
       .deleteMessage(ctx.message.message_id)
-      .then(() =>
+      .then(() => {
+        ctx.reply("Только семья может отправлять медиа-файлы.");
         ctx.restrictChatMember(ctx.message.from.id, {
           permissions: {
             can_send_messages: true,
@@ -91,16 +92,16 @@ bot.on("message", (ctx) => {
             can_invite_users: false,
             can_pin_messages: false,
           },
-        })
-      )
+        });
+      })
       .catch((e) => console.log("CANT DELETE:", ctx.message, e));
   }
 
   // Delete links
   if (!isAllowList(ctx) && spamChecks.some((check) => check(ctx))) {
-    return ctx
-      .deleteMessage(ctx.message.message_id)
-      .catch((e) => console.log("CANT DELETE:", ctx.message, e));
+    ctx.reply("Только семья может отправлять ссылки.");
+
+    return ctx.deleteMessage(ctx.message.message_id).catch((e) => console.log("CANT DELETE:", ctx.message, e));
   }
 
   // Delete messages in english
