@@ -80,7 +80,10 @@ bot.on("message", (ctx) => {
     return ctx
       .deleteMessage(ctx.message.message_id)
       .then(() => {
-        ctx.reply("Только семья может отправлять медиа-файлы.");
+        ctx.reply("Только семья может отправлять медиа-файлы.").then((botReply) => {
+          setTimeout(() => ctx.deleteMessage(botReply.message_id), 5000);
+        });
+
         ctx.restrictChatMember(ctx.message.from.id, {
           permissions: {
             can_send_messages: true,
@@ -99,7 +102,9 @@ bot.on("message", (ctx) => {
 
   // Delete links
   if (!isAllowList(ctx) && spamChecks.some((check) => check(ctx))) {
-    ctx.reply("Только семья может отправлять ссылки.");
+    ctx.reply("Только семья может отправлять ссылки.").then((botReply) => {
+      setTimeout(() => ctx.deleteMessage(botReply.message_id), 5000);
+    });
 
     return ctx.deleteMessage(ctx.message.message_id).catch((e) => console.log("CANT DELETE:", ctx.message, e));
   }
