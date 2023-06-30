@@ -74,13 +74,15 @@ const spamChecks = [isChannelBot, hasLink];
 bot.on("message", (ctx) => {
   if (isMe(ctx) || family.includes(ctx.message.from.username)) return;
 
+  const replyToChannelId = ctx.message.reply_to_message?.sender_chat && ctx.message.reply_to_message?.from.first_name === "Telegram" ? ctx.message.reply_to_message.message_id : null;
+
   // Delete media messages
   if (!ctx.message.text) {
     // block user from sending media
     return ctx
       .deleteMessage(ctx.message.message_id)
       .then(() => {
-        ctx.reply("Только семья может публиковать медиа и стикеры: https://seniorsoftwarevlogger.com/support", {disable_web_page_preview: true}).then((botReply) => {
+        ctx.telegram.sendMessage(ctx.chat.id, "Только семья может публиковать медиа и стикеры: https://seniorsoftwarevlogger.com/support", {disable_web_page_preview: true, reply_to_message_id: replyToChannelId}).then((botReply) => {
           setTimeout(() => ctx.deleteMessage(botReply.message_id), 5000);
         });
 
@@ -102,11 +104,12 @@ bot.on("message", (ctx) => {
 
   // Delete links
   if (!isAllowList(ctx) && spamChecks.some((check) => check(ctx))) {
-    ctx.reply(`Только семья может публиковать ссылки: https://seniorsoftwarevlogger.com/support \nВаш пост перемещен в карантин @ssv_purge`,{disable_web_page_preview: true}).then((botReply) => {
+
+    ctx.telegram.sendMessage(ctx.chat.id, `Только семья может публиковать ссылки: https://seniorsoftwarevlogger.com/support \nВаш пост перемещен в карантин @ssv_purge`, {disable_web_page_preview: true, reply_to_message_id: replyToChannelId}).then((botReply) => {
       setTimeout(() => ctx.deleteMessage(botReply.message_id), 5000);
     });
 
-    return ctx.telegram.forwardMessage(`@ssv_purge`, ctx.chat.id, ctx.message.message_id, {disable_notification: true}).then(res => ctx.deleteMessage(ctx.message.message_id).catch((e) => console.log("CANT DELETE:", ctx.message, e)))
+    return ctx.telegram.copyMessage(`@ssv_purge`, ctx.chat.id, ctx.message.message_id, {disable_notification: true}).then(res => ctx.deleteMessage(ctx.message.message_id).catch((e) => console.log("CANT DELETE:", ctx.message, e)))
   }
 
   // Delete messages in english
