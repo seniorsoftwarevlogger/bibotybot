@@ -80,7 +80,7 @@ bot.on("message", (ctx) => {
     return ctx
       .deleteMessage(ctx.message.message_id)
       .then(() => {
-        ctx.reply("Только семья может публиковать медиа и стикеры: https://seniorsoftwarevlogger.com/support").then((botReply) => {
+        ctx.reply("Только семья может публиковать медиа и стикеры: https://seniorsoftwarevlogger.com/support", {disable_web_page_preview: true}).then((botReply) => {
           setTimeout(() => ctx.deleteMessage(botReply.message_id), 5000);
         });
 
@@ -102,11 +102,11 @@ bot.on("message", (ctx) => {
 
   // Delete links
   if (!isAllowList(ctx) && spamChecks.some((check) => check(ctx))) {
-    ctx.reply(`Только семья может публиковать ссылки: https://seniorsoftwarevlogger.com/support \nВаш пост перемещен в карантин @ssv_purge`).then((botReply) => {
+    ctx.reply(`Только семья может публиковать ссылки: https://seniorsoftwarevlogger.com/support \nВаш пост перемещен в карантин @ssv_purge`,{disable_web_page_preview: true}).then((botReply) => {
       setTimeout(() => ctx.deleteMessage(botReply.message_id), 5000);
     });
 
-    return ctx.forwardMessage(`@ssv_purge`).then(res => ctx.deleteMessage(ctx.message.message_id).catch((e) => console.log("CANT DELETE:", ctx.message, e)))
+    return ctx.telegram.forwardMessage(`@ssv_purge`, ctx.chat.id, ctx.message.message_id, {disable_notification: true}).then(res => ctx.deleteMessage(ctx.message.message_id).catch((e) => console.log("CANT DELETE:", ctx.message, e)))
   }
 
   // Delete messages in english
