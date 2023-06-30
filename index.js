@@ -80,7 +80,7 @@ bot.on("message", (ctx) => {
     return ctx
       .deleteMessage(ctx.message.message_id)
       .then(() => {
-        ctx.reply("Только семья может отправлять медиа-файлы.").then((botReply) => {
+        ctx.reply("Только семья может публиковать медиа и стикеры: https://seniorsoftwarevlogger.com/support").then((botReply) => {
           setTimeout(() => ctx.deleteMessage(botReply.message_id), 5000);
         });
 
@@ -102,11 +102,11 @@ bot.on("message", (ctx) => {
 
   // Delete links
   if (!isAllowList(ctx) && spamChecks.some((check) => check(ctx))) {
-    ctx.reply("Только семья может отправлять ссылки.").then((botReply) => {
+    ctx.reply(`Только семья может публиковать ссылки: https://seniorsoftwarevlogger.com/support \nВаш пост перемещен в карантин @ssv_purge`).then((botReply) => {
       setTimeout(() => ctx.deleteMessage(botReply.message_id), 5000);
     });
 
-    return ctx.deleteMessage(ctx.message.message_id).catch((e) => console.log("CANT DELETE:", ctx.message, e));
+    return ctx.forwardMessage(`@ssv_purge`).then(res => ctx.deleteMessage(ctx.message.message_id).catch((e) => console.log("CANT DELETE:", ctx.message, e)))
   }
 
   // Delete messages in english
