@@ -57,7 +57,7 @@ const bot = new Telegraf(BOT_TOKEN, {
 });
 
 const myChannels = ME.split(",");
-const family = await mongo.db("family").collection("users").find({}).toArray().then(users => users.map(user => user.username));
+let family = await mongo.db("family").collection("users").find({}).toArray().then(users => users.map(user => user.username));
 
 function isMe({ message }) {
   return (
@@ -88,7 +88,7 @@ bot.on("message", (ctx) => {
       .deleteMessage(ctx.message.message_id)
       .then(() => {
         ctx.telegram.sendMessage(ctx.chat.id, "Только семья может публиковать медиа и стикеры: https://seniorsoftwarevlogger.com/support", {disable_web_page_preview: true, reply_to_message_id: replyToChannelId}).then((botReply) => {
-          setTimeout(() => ctx.deleteMessage(botReply.message_id), 5000);
+          setTimeout(() => ctx.deleteMessage(botReply.message_id), 10000);
         });
 
         ctx.restrictChatMember(ctx.message.from.id, {
@@ -111,7 +111,7 @@ bot.on("message", (ctx) => {
   if (spamChecks.some((check) => check(ctx))) {
 
     ctx.telegram.sendMessage(ctx.chat.id, `Только семья может публиковать ссылки: https://seniorsoftwarevlogger.com/support \nВаш пост перемещен в карантин @ssv_purge`, {disable_web_page_preview: true, reply_to_message_id: replyToChannelId}).then((botReply) => {
-      setTimeout(() => ctx.deleteMessage(botReply.message_id), 5000);
+      setTimeout(() => ctx.deleteMessage(botReply.message_id), 10000);
     });
 
     return ctx.telegram.copyMessage(`@ssv_purge`, ctx.chat.id, ctx.message.message_id, {disable_notification: true}).then(res => ctx.deleteMessage(ctx.message.message_id).catch((e) => console.log("CANT DELETE:", ctx.message, e)))
