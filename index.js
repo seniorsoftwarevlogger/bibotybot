@@ -40,7 +40,6 @@ if (isProduction && missingEnv.length > 0) {
 }
 
 const mongo = new MongoClient(process.env.MONGODB_URI);
-await mongo.connect();
 
 // Main ========================================================================
 
@@ -51,7 +50,7 @@ const bot = new Telegraf(BOT_TOKEN, {
 });
 
 const myChannels = ME.split(",");
-const family = mongo.db("family").collection("users").find({}).toArray().map(user => user.username);
+const family = mongo.connect().then(client => client.db("family").collection("users").find({}).toArray()).then(users => users.map(user => user.username));
 
 function isMe({ message }) {
   return (
