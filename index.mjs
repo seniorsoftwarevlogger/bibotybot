@@ -1,9 +1,16 @@
-const { Telegraf } = require("telegraf");
-const i18n = require("i18n");
-const Sentry = require("@sentry/node");
-const LanguageDetect = require("languagedetect");
+import { Telegraf } from "telegraf";
+import i18n from "i18n";
+import { init } from "@sentry/node";
+import LanguageDetect from "languagedetect";
+import { MongoClient } from "mongodb";
+import { fileURLToPath } from 'url';
+import { dirname } from 'path';
+import dotenv from "dotenv";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 const lngDetector = new LanguageDetect();
-const {MongoClient} = require("mongodb");
 
 // Setup =======================================================================
 
@@ -16,11 +23,11 @@ i18n.configure({
 const isProduction = process.env.NODE_ENV === "production";
 
 if (!isProduction) {
-  require("dotenv").config();
+  dotenv.config();
 }
 
 if (process.env.SENTRY_DSN) {
-  Sentry.init({ dsn: process.env.SENTRY_DSN });
+  init({ dsn: process.env.SENTRY_DSN });
 }
 
 const missingEnv = [
@@ -40,7 +47,7 @@ if (isProduction && missingEnv.length > 0) {
 }
 
 const mongo = new MongoClient(process.env.MONGODB_URI);
-
+await mongo.connect();
 // Main ========================================================================
 
 const bot = new Telegraf(BOT_TOKEN, {
@@ -50,7 +57,7 @@ const bot = new Telegraf(BOT_TOKEN, {
 });
 
 const myChannels = ME.split(",");
-const family = mongo.connect().then(client => client.db("family").collection("users").find({}).toArray()).then(users => users.map(user => user.username));
+const family = await mongo.db("family").collection("users").find({}).toArray().then(users => users.map(user => user.username));
 
 function isMe({ message }) {
   return (
