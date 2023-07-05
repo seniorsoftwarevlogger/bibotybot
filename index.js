@@ -3,6 +3,7 @@ const i18n = require("i18n");
 const Sentry = require("@sentry/node");
 const LanguageDetect = require("languagedetect");
 const lngDetector = new LanguageDetect();
+const mongodb = require("mongodb");
 
 // Setup =======================================================================
 
@@ -27,17 +28,18 @@ const missingEnv = [
   "PORT",
   "BOT_TOKEN",
   "WEBHOOK_URL",
-  "ALLOW",
-  "FAMILY",
+  "MONGODB_URI",
 ].filter((e) => !process.env[e]);
 
-const { ME, PORT, BOT_TOKEN, NODE_ENV, WEBHOOK_URL, ALLOW, FAMILY } =
+const { ME, PORT, BOT_TOKEN, WEBHOOK_URL } =
   process.env;
 
 if (isProduction && missingEnv.length > 0) {
   console.error("Missing ENV var:", missingEnv.join(", "));
   process.exit(1);
 }
+
+const db = new mongodb.MongoClient(process.env.MONGODB_URI);
 
 // Main ========================================================================
 
@@ -48,8 +50,7 @@ const bot = new Telegraf(BOT_TOKEN, {
 });
 
 const myChannels = ME.split(",");
-const allowList = ALLOW.split(",");
-const family = FAMILY.split(",");
+const family = db.database("family").collection("users").find({}).toArray().map(user => user.username);
 
 function isMe({ message }) {
   return (
@@ -57,9 +58,6 @@ function isMe({ message }) {
     (message.from.first_name === "Channel" &&
       myChannels.includes(message.sender_chat?.username))
   );
-}
-function isAllowList({ message }) {
-  return message.from?.username && allowList.includes(message.from?.username);
 }
 function isChannelBot({ message }) {
   return message.from.first_name === "Channel";
@@ -103,7 +101,7 @@ bot.on("message", (ctx) => {
   }
 
   // Delete links
-  if (!isAllowList(ctx) && spamChecks.some((check) => check(ctx))) {
+  if (spamChecks.some((check) => check(ctx))) {
 
     ctx.telegram.sendMessage(ctx.chat.id, `Только семья может публиковать ссылки: https://seniorsoftwarevlogger.com/support \nВаш пост перемещен в карантин @ssv_purge`, {disable_web_page_preview: true, reply_to_message_id: replyToChannelId}).then((botReply) => {
       setTimeout(() => ctx.deleteMessage(botReply.message_id), 5000);
