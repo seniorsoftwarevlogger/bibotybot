@@ -3,7 +3,7 @@ const i18n = require("i18n");
 const Sentry = require("@sentry/node");
 const LanguageDetect = require("languagedetect");
 const lngDetector = new LanguageDetect();
-const mongodb = require("mongodb");
+const {MongoClient} = require("mongodb");
 
 // Setup =======================================================================
 
@@ -39,7 +39,8 @@ if (isProduction && missingEnv.length > 0) {
   process.exit(1);
 }
 
-const db = new mongodb.MongoClient(process.env.MONGODB_URI);
+const mongo = new MongoClient(process.env.MONGODB_URI);
+await mongo.connect();
 
 // Main ========================================================================
 
@@ -50,7 +51,7 @@ const bot = new Telegraf(BOT_TOKEN, {
 });
 
 const myChannels = ME.split(",");
-const family = db.database("family").collection("users").find({}).toArray().map(user => user.username);
+const family = mongo.db("family").collection("users").find({}).toArray().map(user => user.username);
 
 function isMe({ message }) {
   return (
