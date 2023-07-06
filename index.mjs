@@ -3,8 +3,8 @@ import i18n from "i18n";
 import { init } from "@sentry/node";
 import LanguageDetect from "languagedetect";
 import { MongoClient } from "mongodb";
-import { fileURLToPath } from 'url';
-import { dirname } from 'path';
+import { fileURLToPath } from "url";
+import { dirname } from "path";
 import dotenv from "dotenv";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -30,16 +30,9 @@ if (process.env.SENTRY_DSN) {
   init({ dsn: process.env.SENTRY_DSN });
 }
 
-const missingEnv = [
-  "ME",
-  "PORT",
-  "BOT_TOKEN",
-  "WEBHOOK_URL",
-  "MONGODB_URI",
-].filter((e) => !process.env[e]);
+const missingEnv = ["ME", "PORT", "BOT_TOKEN", "WEBHOOK_URL", "MONGODB_URI"].filter((e) => !process.env[e]);
 
-const { ME, PORT, BOT_TOKEN, WEBHOOK_URL } =
-  process.env;
+const { ME, PORT, BOT_TOKEN, WEBHOOK_URL } = process.env;
 
 if (isProduction && missingEnv.length > 0) {
   console.error("Missing ENV var:", missingEnv.join(", "));
@@ -57,13 +50,27 @@ const bot = new Telegraf(BOT_TOKEN, {
 });
 
 const myChannels = ME.split(",");
-let family = await mongo.db("family").collection("users").find({}).toArray().then(users => users.map(user => user.username));
+let family = await mongo
+  .db("family")
+  .collection("users")
+  .find({})
+  .toArray()
+  .then((users) => users.map((user) => user.username));
+
+const changeStream = mongo.db("family").collection("users").watch();
+changeStream.on("change", async (change) => {
+  family = await mongo
+    .db("family")
+    .collection("users")
+    .find({})
+    .toArray()
+    .then((users) => users.map((user) => user.username));
+});
 
 function isMe({ message }) {
   return (
     message.from.first_name === "Telegram" ||
-    (message.from.first_name === "Channel" &&
-      myChannels.includes(message.sender_chat?.username))
+    (message.from.first_name === "Channel" && myChannels.includes(message.sender_chat?.username))
   );
 }
 function isChannelBot({ message }) {
@@ -79,7 +86,10 @@ const spamChecks = [isChannelBot, hasLink];
 bot.on("message", (ctx) => {
   if (isMe(ctx) || family.includes(ctx.message.from.username)) return;
 
-  const replyToChannelId = ctx.message.reply_to_message?.sender_chat && ctx.message.reply_to_message?.from.first_name === "Telegram" ? ctx.message.reply_to_message.message_id : null;
+  const replyToChannelId =
+    ctx.message.reply_to_message?.sender_chat && ctx.message.reply_to_message?.from.first_name === "Telegram"
+      ? ctx.message.reply_to_message.message_id
+      : null;
 
   // Delete media messages
   if (!ctx.message.text) {
@@ -87,9 +97,15 @@ bot.on("message", (ctx) => {
     return ctx
       .deleteMessage(ctx.message.message_id)
       .then(() => {
-        ctx.telegram.sendMessage(ctx.chat.id, "Только семья может публиковать медиа и стикеры: https://seniorsoftwarevlogger.com/support", {disable_web_page_preview: true, reply_to_message_id: replyToChannelId}).then((botReply) => {
-          setTimeout(() => ctx.deleteMessage(botReply.message_id), 10000);
-        });
+        ctx.telegram
+          .sendMessage(
+            ctx.chat.id,
+            "Только семья может публиковать медиа и стикеры: https://seniorsoftwarevlogger.com/support",
+            { disable_web_page_preview: true, reply_to_message_id: replyToChannelId }
+          )
+          .then((botReply) => {
+            setTimeout(() => ctx.deleteMessage(botReply.message_id), 10000);
+          });
 
         ctx.restrictChatMember(ctx.message.from.id, {
           permissions: {
@@ -109,21 +125,28 @@ bot.on("message", (ctx) => {
 
   // Delete links
   if (spamChecks.some((check) => check(ctx))) {
+    ctx.telegram
+      .sendMessage(
+        ctx.chat.id,
+        `Только семья может публиковать ссылки: https://seniorsoftwarevlogger.com/support \nВаш пост перемещен в карантин @ssv_purge`,
+        { disable_web_page_preview: true, reply_to_message_id: replyToChannelId }
+      )
+      .then((botReply) => {
+        setTimeout(() => ctx.deleteMessage(botReply.message_id), 10000);
+      });
 
-    ctx.telegram.sendMessage(ctx.chat.id, `Только семья может публиковать ссылки: https://seniorsoftwarevlogger.com/support \nВаш пост перемещен в карантин @ssv_purge`, {disable_web_page_preview: true, reply_to_message_id: replyToChannelId}).then((botReply) => {
-      setTimeout(() => ctx.deleteMessage(botReply.message_id), 10000);
-    });
-
-    return ctx.telegram.copyMessage(`@ssv_purge`, ctx.chat.id, ctx.message.message_id, {disable_notification: true}).then(res => ctx.deleteMessage(ctx.message.message_id).catch((e) => console.log("CANT DELETE:", ctx.message, e)))
+    return ctx.telegram
+      .copyMessage(`@ssv_purge`, ctx.chat.id, ctx.message.message_id, { disable_notification: true })
+      .then((res) =>
+        ctx.deleteMessage(ctx.message.message_id).catch((e) => console.log("CANT DELETE:", ctx.message, e))
+      );
   }
 
   // Delete messages in english
   try {
     const lang = lngDetector.detect(ctx.message.text, 1)[0][0];
     if (lang === "english") {
-      return ctx
-        .deleteMessage(ctx.message.message_id)
-        .catch((e) => console.log("CANT DELETE:", ctx.message, e));
+      return ctx.deleteMessage(ctx.message.message_id).catch((e) => console.log("CANT DELETE:", ctx.message, e));
     }
   } catch (e) {
     console.log("CANT DETECT LANGUAGE:", ctx.message, e);
