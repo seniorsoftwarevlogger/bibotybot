@@ -57,15 +57,24 @@ let family = await mongo
   .toArray()
   .then((users) => users.map((user) => user.username));
 
-const changeStream = mongo.db("family").collection("users").watch();
-changeStream.on("change", async (change) => {
+setInterval(async () => {
   family = await mongo
     .db("family")
     .collection("users")
     .find({})
     .toArray()
     .then((users) => users.map((user) => user.username));
-});
+}, 1000 * 60 * 60);
+
+// const changeStream = mongo.db("family").collection("users").watch();
+// changeStream.on("change", async (change) => {
+//   family = await mongo
+//     .db("family")
+//     .collection("users")
+//     .find({})
+//     .toArray()
+//     .then((users) => users.map((user) => user.username));
+// });
 
 function isMe({ message }) {
   return (
@@ -100,7 +109,7 @@ bot.on("message", (ctx) => {
         ctx.telegram
           .sendMessage(
             ctx.chat.id,
-            "Только семья может публиковать медиа и стикеры: https://seniorsoftwarevlogger.com/support",
+            `💸 Купи стикеры, @{ctx.message.from.username}: https://boosty.to/seniorsoftwarevlogger`,
             { disable_web_page_preview: true, reply_to_message_id: replyToChannelId }
           )
           .then((botReply) => {
@@ -128,11 +137,11 @@ bot.on("message", (ctx) => {
     ctx.telegram
       .sendMessage(
         ctx.chat.id,
-        `Только семья может публиковать ссылки: https://seniorsoftwarevlogger.com/support \nВаш пост перемещен в карантин @ssv_purge`,
+        `💸 Купи ссылки, @{ctx.message.from.username}: https://boosty.to/seniorsoftwarevlogger \nТекст поста перемещен в карантин @ssv_purge`,
         { disable_web_page_preview: true, reply_to_message_id: replyToChannelId }
       )
       .then((botReply) => {
-        setTimeout(() => ctx.deleteMessage(botReply.message_id), 10000);
+        setTimeout(() => ctx.deleteMessage(botReply.message_id), 60000);
       });
 
     return ctx.telegram
