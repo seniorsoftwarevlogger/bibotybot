@@ -109,7 +109,7 @@ bot.on("message", (ctx) => {
         ctx.telegram
           .sendMessage(
             ctx.chat.id,
-            `💸 Купи стикеры, @{ctx.message.from.username}: https://boosty.to/seniorsoftwarevlogger`,
+            `💸 Купи стикеры, @${ctx.message.from.username}: https://boosty.to/seniorsoftwarevlogger`,
             { disable_web_page_preview: true, reply_to_message_id: replyToChannelId }
           )
           .then((botReply) => {
@@ -137,7 +137,7 @@ bot.on("message", (ctx) => {
     ctx.telegram
       .sendMessage(
         ctx.chat.id,
-        `💸 Купи ссылки, @{ctx.message.from.username}: https://boosty.to/seniorsoftwarevlogger \nТекст поста перемещен в карантин @ssv_purge`,
+        `💸 Купи ссылки, @${ctx.message.from.username}: https://boosty.to/seniorsoftwarevlogger \nТекст поста перемещен в карантин @ssv_purge`,
         { disable_web_page_preview: true, reply_to_message_id: replyToChannelId }
       )
       .then((botReply) => {
