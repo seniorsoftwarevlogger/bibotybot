@@ -1,7 +1,6 @@
 import { Telegraf } from "telegraf";
 import i18n from "i18n";
 import { init } from "@sentry/node";
-import LanguageDetect from "languagedetect";
 import { MongoClient } from "mongodb";
 import { fileURLToPath } from "url";
 import { dirname } from "path";
@@ -9,8 +8,6 @@ import dotenv from "dotenv";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
-
-const lngDetector = new LanguageDetect();
 
 // Setup =======================================================================
 
@@ -66,16 +63,6 @@ setInterval(async () => {
     .then((users) => users.map((user) => user.username));
 }, 1000 * 60 * 60);
 
-// const changeStream = mongo.db("family").collection("users").watch();
-// changeStream.on("change", async (change) => {
-//   family = await mongo
-//     .db("family")
-//     .collection("users")
-//     .find({})
-//     .toArray()
-//     .then((users) => users.map((user) => user.username));
-// });
-
 function isMe({ message }) {
   return (
     message.from.first_name === "Telegram" ||
@@ -87,7 +74,6 @@ function isChannelBot({ message }) {
 }
 function hasLink(ctx) {
   return ctx.message.entities?.some((entity) => entity.type === "url" || entity.type === "text_link");
-  // return ctx.message.text?.includes("t.me");
 }
 
 const spamChecks = [isChannelBot, hasLink];
@@ -149,16 +135,6 @@ bot.on("message", (ctx) => {
       .then((res) =>
         ctx.deleteMessage(ctx.message.message_id).catch((e) => console.log("CANT DELETE:", ctx.message, e))
       );
-  }
-
-  // Delete messages in english
-  try {
-    const lang = lngDetector.detect(ctx.message.text, 1)[0][0];
-    if (lang === "english") {
-      return ctx.deleteMessage(ctx.message.message_id).catch((e) => console.log("CANT DELETE:", ctx.message, e));
-    }
-  } catch (e) {
-    console.log("CANT DETECT LANGUAGE:", ctx.message, e);
   }
 });
 
