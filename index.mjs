@@ -78,6 +78,23 @@ function hasLink(ctx) {
 
 const spamChecks = [isChannelBot, hasLink];
 
+// New functionality to handle ban events and replicate them across all channels
+bot.on("chat_member", async (ctx) => {
+  // Check if the update is a ban event and if the user issuing the ban is an admin
+  if (ctx.update.chat_member.new_chat_member.status === "kicked" && myChannels.includes(ctx.from.username)) {
+    const userId = ctx.update.chat_member.from.id;
+
+    // Replicate the ban across all channels managed by the bot
+    for (const channel of myChannels) {
+      await ctx.telegram.banChatMember(channel, userId).catch((error) => {
+        console.error(`Failed to ban user ${userId} in channel ${channel}:`, error);
+      });
+    }
+
+    ctx.reply(`User ${userId} has been banned from all managed channels.`);
+  }
+});
+
 bot.on("message", (ctx) => {
   if (isMe(ctx) || family.includes(ctx.message.from.username)) return;
 
@@ -144,6 +161,7 @@ const botOptions = isProduction
         domain: WEBHOOK_URL,
         port: parseInt(PORT, 10),
       },
+      allowedUpdates: ["chat_member", "message", "edited_message"]
     }
   : {
       polling: { timeout: 30, limit: 10 },
