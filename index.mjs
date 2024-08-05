@@ -76,8 +76,6 @@ function hasLink(ctx) {
   return ctx.message.entities?.some((entity) => entity.type === "url" || entity.type === "text_link");
 }
 
-const spamChecks = [isChannelBot, hasLink];
-
 // New functionality to handle ban events and replicate them across all channels
 bot.on("chat_member", async (ctx) => {
   // Check if the update is a ban event and if the user issuing the ban is an admin
@@ -136,11 +134,11 @@ bot.on("message", (ctx) => {
   }
 
   // Delete links
-  if (spamChecks.some((check) => check(ctx))) {
+  if (hasLinks(ctx)) {
     ctx.telegram
       .sendMessage(
         ctx.chat.id,
-        `💸 Купи ссылки, @${ctx.message.from.username}: https://boosty.to/seniorsoftwarevlogger \nТекст поста перемещен в карантин @ssv_purge`,
+        `Ссылки только за деньги, @${ctx.message.from.username}: https://boosty.to/seniorsoftwarevlogger \nТекст поста перемещен в карантин @ssv_purge`,
         { disable_web_page_preview: true, reply_to_message_id: replyToChannelId }
       )
       .then((botReply) => {
@@ -148,7 +146,25 @@ bot.on("message", (ctx) => {
       });
 
     return ctx.telegram
-      .copyMessage(`@ssv_purge`, ctx.chat.id, ctx.message.message_id, { disable_notification: true })
+      .copyMessage(`@ssv_purge`, ctx.chat.id, ctx.message.message_id, { disable_notification: true, link_preview_options: {is_disabled: true} })
+      .then((res) =>
+        ctx.deleteMessage(ctx.message.message_id).catch((e) => console.log("CANT DELETE:", ctx.message, e))
+      );
+  }
+  // Delete channels
+  if (isChannelBot(ctx)) {
+    ctx.telegram
+      .sendMessage(
+        ctx.chat.id,
+        `Под каналом писать нельзя \nТекст поста перемещен в карантин @ssv_purge`,
+        { disable_web_page_preview: true, reply_to_message_id: replyToChannelId }
+      )
+      .then((botReply) => {
+        setTimeout(() => ctx.deleteMessage(botReply.message_id), 60000);
+      });
+
+    return ctx.telegram
+      .copyMessage(`@ssv_purge`, ctx.chat.id, ctx.message.message_id, { disable_notification: true, link_preview_options: {is_disabled: true}  })
       .then((res) =>
         ctx.deleteMessage(ctx.message.message_id).catch((e) => console.log("CANT DELETE:", ctx.message, e))
       );
