@@ -72,7 +72,7 @@ function isMe({ message }) {
 function isChannelBot({ message }) {
   return message.from.first_name === "Channel";
 }
-function hasLink(ctx) {
+function hasLinks(ctx) {
   return ctx.message.entities?.some((entity) => entity.type === "url" || entity.type === "text_link");
 }
 
