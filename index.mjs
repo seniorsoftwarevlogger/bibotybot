@@ -1,21 +1,9 @@
 import { Telegraf } from "telegraf";
-import i18n from "i18n";
 import { init } from "@sentry/node";
 import { MongoClient } from "mongodb";
-import { fileURLToPath } from "url";
-import { dirname } from "path";
 import dotenv from "dotenv";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
 // Setup =======================================================================
-
-i18n.configure({
-  defaultLocale: "ru",
-  locales: ["ru", "en"],
-  directory: __dirname + "/locales",
-});
 
 dotenv.config();
 

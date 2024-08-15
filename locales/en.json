@@ -1,4 +1,0 @@
-{
-	"No new comments": "No new comments 🤷‍♂️",
-	"newCommentMessage": "<b>💬 New comment to your video «<a href=\"https://www.youtube.com/watch?v={{videoId}}&lc={{commentId}}\">{{videoTitle}}</a>»</b> by <a href=\"{{authorChannelUrl}}\">{{authorDisplayName}}</a> 👍 {{likeCount}}\n\n{{textOriginal}}\n\n<a href=\"https://www.youtube.com/watch?v={{videoId}}&lc={{commentId}}\">Read ➜</a>"
-}
