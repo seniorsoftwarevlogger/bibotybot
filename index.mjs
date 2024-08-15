@@ -17,39 +17,20 @@ i18n.configure({
   directory: __dirname + "/locales",
 });
 
-const isProduction = process.env.NODE_ENV === "production";
-
-if (!isProduction) {
-  dotenv.config();
-}
+dotenv.config();
 
 if (process.env.SENTRY_DSN) {
   init({ dsn: process.env.SENTRY_DSN });
 }
 
-const missingEnv = [
-  "ME",
-  "PORT",
-  "BOT_TOKEN",
-  "WEBHOOK_URL",
-  "MONGODB_URI",
-].filter((e) => !process.env[e]);
-
-const { ME, PORT, BOT_TOKEN, WEBHOOK_URL } = process.env;
-
-if (isProduction && missingEnv.length > 0) {
-  console.error("Missing ENV var:", missingEnv.join(", "));
-  process.exit(1);
-}
+const { ME, BOT_TOKEN, WEBHOOK_URL } = process.env;
 
 const mongo = new MongoClient(process.env.MONGODB_URI);
 await mongo.connect();
 // Main ========================================================================
 
 const bot = new Telegraf(BOT_TOKEN, {
-  telegram: {
-    webhookReply: isProduction,
-  },
+  telegram: { webhookReply: !!WEBHOOK_URL },
 });
 
 const myChannels = ME.split(",");
@@ -87,13 +68,15 @@ function hasLinks(ctx) {
   );
 }
 async function boostedChannel(ctx) {
-  const channelId = ctx.message.reply_to_message?.sender_chat?.id;
-  const boostsById = await ctx.telegram.getUserChatBoosts(
-    channelId,
-    ctx.message.from.id
-  );
+  const channelId =
+    ctx.message.reply_to_message?.sender_chat?.id || "@seniorsoftwarevlogger";
+  const boostsById = (await ctx.telegram
+    .getUserChatBoosts(channelId, ctx.message.from.id)
+    .catch((e) => console.log(e))) || { boosts: [] };
 
-  return boostsById.boosts?.some((b) => b.expiration_date > Date.now());
+  return !!boostsById.boosts?.some(
+    (b) => new Date(b.expiration_date * 1000) > Date.now()
+  );
 }
 
 // New functionality to handle ban events and replicate them across all channels
@@ -120,29 +103,28 @@ bot.on("chat_member", async (ctx) => {
 });
 
 bot.on("chat_boost", (ctx) => {
-  console.log(ctx.update);
-
-  if (ctx.update.chat_boost) {
-    console.log(ctx.update.chat_boost.boost.source.userId);
-
-    const user = ctx.update.chat_boost.source.user;
-    console.log(user);
-  }
+  console.log("chat_boost", JSON.stringify(ctx.update));
 });
 
 bot.on("removed_chat_boost", (ctx) => {
-  console.log(ctx.update);
-  if (ctx.update.removed_chat_boost) {
-    console.log(ctx.update.removed_chat_boost);
-    const user = ctx.update.removed_chat_boost.source.user;
-    console.log(user);
-  }
+  console.log("removed_chat_boost", JSON.stringify(ctx.update));
 });
 
 bot.on("message", async (ctx) => {
   const isBoosted =
     boostsCache.get(ctx.message.from.id) || (await boostedChannel(ctx));
   if (isBoosted) boostsCache.set(ctx.message.from.id, isBoosted);
+
+  console.log(
+    `id`,
+    ctx.message.from.id,
+    `isMe`,
+    isMe(ctx),
+    `isBoosted`,
+    isBoosted,
+    `family`,
+    family.includes(ctx.message.from.username)
+  );
 
   if (isMe(ctx) || isBoosted || family.includes(ctx.message.from.username))
     return;
@@ -154,7 +136,7 @@ bot.on("message", async (ctx) => {
       : null;
 
   // Delete media messages
-  if (!ctx.message.text && ctx.message.sender_boost_count == 0) {
+  if (!ctx.message.text) {
     // block user from sending media
     return ctx
       .deleteMessage(ctx.message.message_id)
@@ -162,7 +144,7 @@ bot.on("message", async (ctx) => {
         ctx.telegram
           .sendMessage(
             ctx.chat.id,
-            `Медиа за буст канала https://t.me/seniorsoftwarevlogger?boost или https://boosty.to/seniorsoftwarevlogger`,
+            `Медиа за буст канала https://t.me/boost/seniorsoftwarevlogger или за доллар https://boosty.to/seniorsoftwarevlogger`,
             {
               disable_web_page_preview: true,
               reply_to_message_id: replyToChannelId,
@@ -185,15 +167,16 @@ bot.on("message", async (ctx) => {
         //   },
         // });
       })
-      .catch((e) => console.log("CANT DELETE:", ctx.message, e));
+      .catch((e) => console.log("CANT DELETE:", ctx.message, e))
+      .finally(() => console.log("DELETED", ctx.message.message_id));
   }
 
   // Delete links
-  if (hasLinks(ctx) && ctx.message.sender_boost_count == 0) {
+  if (hasLinks(ctx)) {
     ctx.telegram
       .sendMessage(
         ctx.chat.id,
-        `Ссылки за буст канала https://t.me/seniorsoftwarevlogger?boost или https://boosty.to/seniorsoftwarevlogger \nТекст поста перемещен в карантин @ssv_purge`,
+        `Ссылки за буст канала https://t.me/boost/seniorsoftwarevlogger или за доллар https://boosty.to/seniorsoftwarevlogger \nТекст поста перемещен в карантин @ssv_purge`,
         {
           disable_web_page_preview: true,
           reply_to_message_id: replyToChannelId,
@@ -212,6 +195,7 @@ bot.on("message", async (ctx) => {
         ctx
           .deleteMessage(ctx.message.message_id)
           .catch((e) => console.log("CANT DELETE:", ctx.message, e))
+          .finally(() => console.log("DELETED", ctx.message.message_id))
       );
   }
   // Delete channels
@@ -242,19 +226,17 @@ bot.on("message", async (ctx) => {
   }
 });
 
-const botOptions = isProduction
-  ? {
-      webhook: {
-        domain: WEBHOOK_URL,
-        port: parseInt(PORT, 10),
-      },
-      allowedUpdates: ["chat_member", "message", "edited_message"],
-    }
-  : {
-      polling: { timeout: 30, limit: 10 },
-    };
+const launchOptions = process.env.WEBHOOK_URL
+  ? { webhook: { domain: WEBHOOK_URL } }
+  : { polling: { timeout: 30, limit: 10 } };
 
-bot.launch(botOptions);
+bot.launch(
+  {
+    ...launchOptions,
+    allowedUpdates: ["chat_member", "message", "edited_message"],
+  },
+  () => console.log("BOT STARTED")
+);
 
 // Enable graceful stop
 process.once("SIGINT", () => bot.stop("SIGINT"));
