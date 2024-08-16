@@ -92,6 +92,7 @@ bot.on("chat_member", async (ctx) => {
 
 bot.on("chat_boost", (ctx) => {
   console.log("chat_boost", JSON.stringify(ctx.update));
+  restoreUserRights(ctx.message.from.id);
 });
 
 bot.on("removed_chat_boost", (ctx) => {
@@ -142,18 +143,7 @@ bot.on("message", async (ctx) => {
             setTimeout(() => ctx.deleteMessage(botReply.message_id), 10000);
           });
 
-        // ctx.restrictChatMember(ctx.message.from.id, {
-        //   permissions: {
-        //     can_send_messages: true,
-        //     can_send_media_messages: false,
-        //     can_send_polls: false,
-        //     can_send_other_messages: false,
-        //     can_add_web_page_previews: false,
-        //     can_change_info: false,
-        //     can_invite_users: false,
-        //     can_pin_messages: false,
-        //   },
-        // });
+        blockUser(ctx.message.from.id);
       })
       .catch((e) => console.log("CANT DELETE:", ctx.message, e))
       .finally(() => console.log("DELETED", ctx.message.message_id));
@@ -184,7 +174,8 @@ bot.on("message", async (ctx) => {
           .deleteMessage(ctx.message.message_id)
           .catch((e) => console.log("CANT DELETE:", ctx.message, e))
           .finally(() => console.log("DELETED", ctx.message.message_id))
-      );
+      )
+      .then(() => blockUser(ctx.message.from.id));
   }
   // Delete channels
   if (isChannelBot(ctx)) {
@@ -229,3 +220,27 @@ bot.launch(
 // Enable graceful stop
 process.once("SIGINT", () => bot.stop("SIGINT"));
 process.once("SIGTERM", () => bot.stop("SIGTERM"));
+
+function blockUser(userId) {
+  bot.telegram.restrictChatMember(userId, {
+    permissions: {
+      can_send_messages: true,
+      can_send_media_messages: false,
+      can_send_polls: false,
+      can_send_other_messages: false,
+      can_add_web_page_previews: false,
+    },
+  });
+}
+
+function restoreUserRights(userId) {
+  bot.telegram.restrictChatMember(userId, {
+    permissions: {
+      can_send_messages: true,
+      can_send_media_messages: true,
+      can_send_polls: true,
+      can_send_other_messages: true,
+      can_add_web_page_previews: true,
+    },
+  });
+}
