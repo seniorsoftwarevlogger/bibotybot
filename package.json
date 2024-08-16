@@ -2,14 +2,14 @@
   "name": "bibotybot",
   "version": "1.0.0",
   "description": "",
-  "main": "index.mjs",
+  "main": "index.ts",
   "type": "module",
   "scripts": {
-    "start": "node index.mjs",
+    "start": "node --experimental-strip-types index.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "engines": {
-    "node": "19.x"
+    "node": "22.6"
   },
   "author": "",
   "license": "MIT",
