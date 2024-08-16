@@ -1,4 +1,4 @@
-# Cut the BS on Telegram 
+# Cut the BS on Telegram
 
 Simple bot that deletes t.me links from the channel posts.
 
@@ -28,8 +28,7 @@ SENTRY_DSN=
 
 ## Features
 
-1. **i18n**: русский, english
-2. **Ban Replication**: The bot now supports replicating ban events across all managed channels upon receiving a ban command from an admin.
+1. **Ban Replication**: The bot now supports replicating ban events across all managed channels upon receiving a ban command from an admin.
 
 ### Ban Replication Feature
 
