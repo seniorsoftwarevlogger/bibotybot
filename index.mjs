@@ -2,10 +2,12 @@ import { Telegraf } from "telegraf";
 import { init } from "@sentry/node";
 import { MongoClient } from "mongodb";
 import dotenv from "dotenv";
+import { setupErrorHandler } from "./src/errors.mjs";
 
 // Setup =======================================================================
 
 dotenv.config();
+setupErrorHandler();
 
 if (process.env.SENTRY_DSN) {
   init({ dsn: process.env.SENTRY_DSN });
