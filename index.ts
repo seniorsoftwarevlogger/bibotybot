@@ -9,7 +9,6 @@ import {
   deleteMessage,
   deleteMediaMessage,
 } from "./src/lib.ts";
-import { message } from "telegraf/filters";
 
 // Setup =======================================================================
 
