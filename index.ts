@@ -3,6 +3,13 @@ import { init } from "@sentry/node";
 import { MongoClient } from "mongodb";
 import dotenv from "dotenv";
 import { setupErrorHandler } from "./src/errors.ts";
+import {
+  blockUser,
+  restoreUserRights,
+  deleteMessage,
+  deleteMediaMessage,
+} from "./src/lib.ts";
+import { message } from "telegraf/filters";
 
 // Setup =======================================================================
 
@@ -69,14 +76,14 @@ bot.on("chat_member", async (ctx) => {
 bot.on("chat_boost", (ctx) => {
   console.log("chat_boost", JSON.stringify(ctx.update));
   const userId = ctx.update.chat_boost.boost.source.user?.id;
-  restoreUserRights(ctx.chat.id, userId);
+  restoreUserRights(ctx.telegram, ctx.chat.id, userId);
   boostsCache.set([ctx.chat.id, userId], true);
 });
 
 bot.on("removed_chat_boost", (ctx) => {
   console.log("removed_chat_boost", JSON.stringify(ctx.update));
   const userId = ctx.update.removed_chat_boost.source.user?.id;
-  blockUser(ctx.chat.id, userId);
+  blockUser(ctx.telegram, ctx.chat.id, userId);
   boostsCache.set([ctx.chat.id, userId], false);
 });
 
@@ -124,83 +131,6 @@ bot.launch(
 process.once("SIGINT", () => bot.stop("SIGINT"));
 process.once("SIGTERM", () => bot.stop("SIGTERM"));
 
-function blockUser(chatId, userId) {
-  bot.telegram.restrictChatMember(chatId, userId, {
-    permissions: {
-      can_send_audios: false,
-      can_send_documents: false,
-      can_send_photos: false,
-      can_send_videos: false,
-      can_send_video_notes: false,
-      can_send_voice_notes: false,
-      can_send_polls: false,
-      can_send_other_messages: false,
-      can_add_web_page_previews: false,
-    },
-  });
-}
-
-function restoreUserRights(chatId, userId) {
-  bot.telegram.restrictChatMember(chatId, userId, {
-    permissions: {
-      can_send_audios: true,
-      can_send_documents: true,
-      can_send_photos: true,
-      can_send_videos: true,
-      can_send_video_notes: true,
-      can_send_voice_notes: true,
-      can_send_polls: true,
-      can_send_other_messages: true,
-      can_add_web_page_previews: true,
-    },
-  });
-}
-
-function deleteMediaMessage(ctx) {
-  // block user from sending media
-  return ctx
-    .deleteMessage(ctx.message.message_id)
-    .then(() =>
-      ctx.telegram
-        .sendMessage(
-          ctx.chat.id,
-          `Медиа за буст канала https://t.me/boost/seniorsoftwarevlogger или за доллар https://boosty.to/seniorsoftwarevlogger`,
-          {
-            link_preview_options: { is_disabled: true },
-            reply_parameters: {
-              message_id: getReplyToChannelId(ctx.message.reply_to_message),
-            },
-          }
-        )
-        .then((botReply) =>
-          setTimeout(() => ctx.deleteMessage(botReply.message_id), 10000)
-        )
-    )
-    .then(() => blockUser(ctx.chat.id, ctx.message.from.id))
-    .catch((e) => console.log("CANT DELETE:", ctx.message, e))
-    .finally(() => console.log("DELETED", ctx.message.message_id));
-}
-function deleteMessage(ctx, warningMessage) {
-  ctx.telegram
-    .sendMessage(ctx.chat.id, warningMessage, {
-      link_preview_options: { is_disabled: true },
-      message_id: getReplyToChannelId(ctx.message.reply_to_message),
-    })
-    .then((botReply) => {
-      setTimeout(() => ctx.deleteMessage(botReply.message_id), 60000);
-    });
-
-  return ctx.telegram
-    .copyMessage(`@ssv_purge`, ctx.chat.id, ctx.message.message_id, {
-      disable_notification: true,
-    })
-    .then((res) =>
-      ctx
-        .deleteMessage(ctx.message.message_id)
-        .catch((e) => console.log("CANT DELETE:", ctx.message, e))
-        .finally(() => console.log("DELETED", ctx.message.message_id))
-    );
-}
 function isMe({ message }) {
   return (
     message.from.first_name === "Telegram" ||
@@ -235,10 +165,4 @@ async function boostedChannel(ctx) {
   boostsCache.set([channelId, userId], boosted);
 
   return boosted;
-}
-function getReplyToChannelId(replyToMessage) {
-  return replyToMessage?.sender_chat &&
-    replyToMessage?.from.first_name === "Telegram"
-    ? replyToMessage.message_id
-    : null;
 }
