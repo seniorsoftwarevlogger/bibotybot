@@ -1,13 +1,14 @@
-import { Telegraf } from "telegraf";
 import { init } from "@sentry/node";
-import { MongoClient } from "mongodb";
 import dotenv from "dotenv";
+import { MongoClient } from "mongodb";
+import { Telegraf } from "telegraf";
+import { anyOf, message } from "telegraf/filters";
 import { setupErrorHandler } from "./src/errors.ts";
 import {
   blockUser,
-  restoreUserRights,
-  deleteMessage,
   deleteMediaMessage,
+  deleteMessage,
+  restoreUserRights,
 } from "./src/lib.ts";
 
 // Setup =======================================================================
@@ -53,6 +54,39 @@ setInterval(async () => {
 
 const boostsCache = new Map();
 
+bot.use(async (ctx, next) => {
+  const boosted = await boostedChannel(ctx);
+  const family = FAMILY.includes(ctx.message?.from?.username);
+  const id = ctx.message?.from?.id;
+
+  console.log(`${id}: me ${isMe(ctx)}, boosted ${boosted}, family ${family}`);
+
+  if (isMe(ctx) || boosted || family) return; // stop processing
+
+  return next();
+});
+bot.use(async (ctx, next) => {
+  console.debug("isChannelBot", isChannelBot(ctx));
+  if (!isChannelBot(ctx)) return next();
+
+  deleteMessage(
+    ctx,
+    `Под каналом писать нельзя \nТекст поста перемещен в карантин @ssv_purge`
+  );
+});
+bot.on(message("text"), async (ctx, next) => {
+  console.debug("hasLinks", hasLinks(ctx));
+  if (!hasLinks(ctx)) return next();
+
+  deleteMessage(
+    ctx,
+    "Ссылки за буст канала https://t.me/boost/seniorsoftwarevlogger " +
+      "или за доллар https://boosty.to/seniorsoftwarevlogger " +
+      "\nТекст поста перемещен в карантин @ssv_purge"
+  );
+  return;
+});
+
 // New functionality to handle ban events and replicate them across all channels
 bot.on("chat_member", async (ctx) => {
   if (ctx.update.chat_member?.new_chat_member?.status === "kicked") {
@@ -86,32 +120,31 @@ bot.on("removed_chat_boost", (ctx) => {
   boostsCache.set([ctx.chat.id, userId], false);
 });
 
-bot.on("message", async (ctx, next) => {
-  const boosted = await boostedChannel(ctx);
-
-  const family = FAMILY.includes(ctx.message.from.username);
-  const id = ctx.message.from.id;
-
-  console.log(`${id}: me ${isMe(ctx)}, boosted ${boosted}, family ${family}`);
-
-  if (isMe(ctx) || boosted || family) return next();
-
-  if (!ctx.message.hasOwnProperty("text")) deleteMediaMessage(ctx);
-  if (hasLinks(ctx))
-    deleteMessage(
-      ctx,
-      "Ссылки за буст канала https://t.me/boost/seniorsoftwarevlogger " +
-        "или за доллар https://boosty.to/seniorsoftwarevlogger " +
-        "\nТекст поста перемещен в карантин @ssv_purge"
-    );
-  if (isChannelBot(ctx))
-    deleteMessage(
-      ctx,
-      `Под каналом писать нельзя \nТекст поста перемещен в карантин @ssv_purge`
-    );
-
-  return next();
-});
+// Delete media messages
+bot.on(
+  anyOf(
+    message(
+      "photo",
+      "video",
+      "document",
+      "audio",
+      "voice",
+      "video_note",
+      "animation",
+      "poll",
+      "sticker",
+      "location",
+      "venue",
+      "contact",
+      "game",
+      "video_note"
+    )
+  ),
+  async (ctx) => {
+    deleteMediaMessage(ctx);
+    return;
+  }
+);
 
 const launchOptions =
   typeof WEBHOOK_URL === "string"
