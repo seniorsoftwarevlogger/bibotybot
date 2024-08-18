@@ -87,22 +87,24 @@ bot.on(message("text"), async (ctx, next) => {
   return;
 });
 
-// New functionality to handle ban events and replicate them across all channels
+// Replicate ban across all chats
 bot.on("chat_member", async (ctx) => {
   if (ctx.update.chat_member?.new_chat_member?.status === "kicked") {
-    const userId = ctx.update.chat_member.from.id;
+    const bannedFrom = ctx.update.chat_member.chat.id;
+    const adminId = ctx.update.chat_member.from.id;
+    const userId = ctx.update.chat_member.new_chat_member.user.id;
+    const chats = Object.values({
+      "@seniorsoftwarevlogger": 1419874945,
+      "@teamleadtalks": 1312934916,
+    }).filter((id) => id !== bannedFrom);
 
-    // Replicate the ban across all channels managed by the bot
-    for (const channel of myChannels) {
-      await ctx.telegram.banChatMember(channel, userId).catch((error) => {
-        console.error(
-          `Failed to ban user ${userId} in channel ${channel}:`,
-          error
-        );
+    for (const chat of chats) {
+      await ctx.telegram.banChatMember(chat, userId).catch((error) => {
+        console.error(`Failed to ban user ${userId} in chat ${chat}:`, error);
       });
     }
 
-    console.log(`${userId}: User has been banned from ${myChannels}`);
+    console.log(`${adminId} banned ${userId} from ${chats}`);
   }
 });
 
