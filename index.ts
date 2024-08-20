@@ -181,6 +181,8 @@ function hasLinks(ctx) {
   );
 }
 async function boostedChannel(ctx) {
+  if (!ctx.hasOwnProperty("message")) return false;
+
   const userId = ctx.message.from.id;
   const channelId =
     ctx.message.reply_to_message?.sender_chat?.id || "@seniorsoftwarevlogger";
