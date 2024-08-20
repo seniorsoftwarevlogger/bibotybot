@@ -91,7 +91,7 @@ bot.on(message("text"), async (ctx, next) => {
 bot.on("chat_member", async (ctx) => {
   if (ctx.update.chat_member?.new_chat_member?.status === "kicked") {
     const bannedFrom = ctx.update.chat_member.chat.id;
-    const adminId = ctx.update.chat_member.from.id;
+    const adminId = ctx.update.chat_member.from?.id;
     const userId = ctx.update.chat_member.new_chat_member.user.id;
     const chats = Object.values({
       "@seniorsoftwarevlogger": 1419874945,
@@ -183,7 +183,9 @@ function hasLinks(ctx) {
 async function boostedChannel(ctx) {
   if (!ctx.hasOwnProperty("message")) return false;
 
-  const userId = ctx.message.from.id;
+  const userId = ctx.message.from?.id;
+  if (!userId) return false;
+
   const channelId =
     ctx.message.reply_to_message?.sender_chat?.id || "@seniorsoftwarevlogger";
 
