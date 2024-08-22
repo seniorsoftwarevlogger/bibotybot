@@ -34,6 +34,9 @@ await mongo.connect();
 const bot = new Telegraf(BOT_TOKEN, {
   telegram: { webhookReply: !!WEBHOOK_URL },
 });
+bot.catch((error) => {
+  console.error(error);
+});
 
 const myChannels = ME.split(",");
 let FAMILY = await mongo
