@@ -169,6 +169,8 @@ process.once("SIGINT", () => bot.stop("SIGINT"));
 process.once("SIGTERM", () => bot.stop("SIGTERM"));
 
 function isMe({ message }) {
+  if (!message || !message.from) return false;
+
   return (
     message.from.first_name === "Telegram" ||
     (message.from.first_name === "Channel" &&
@@ -176,9 +178,11 @@ function isMe({ message }) {
   );
 }
 function isChannelBot({ message }) {
+  if (!message || !message.from) return false;
   return message.from.first_name === "Channel";
 }
 function hasLinks(ctx) {
+  if (!ctx.message) return false;
   return ctx.message.entities?.some(
     (entity) => entity.type === "url" || entity.type === "text_link"
   );
