@@ -35,7 +35,10 @@ const stopWords = [
   "Trust",
   "Wallet",
   "доход",
+  "Тrust",
+  "Wаllеt",
 ];
+
 const mongo = new MongoClient(MONGODB_URI);
 await mongo.connect();
 // Main ========================================================================
