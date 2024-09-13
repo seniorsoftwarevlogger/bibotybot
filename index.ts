@@ -27,7 +27,15 @@ const {
   MONGODB_URI = "",
 } = process.env;
 
-const stopWords = ["зарабатыват", "Trust", "Wallet", "доход"];
+const stopWords = [
+  "зарабатыват",
+  "зapaбoтoк",
+  "прибыль",
+  "сотрудничеств",
+  "Trust",
+  "Wallet",
+  "доход",
+];
 const mongo = new MongoClient(MONGODB_URI);
 await mongo.connect();
 // Main ========================================================================
