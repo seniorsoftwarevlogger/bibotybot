@@ -1,7 +1,7 @@
 import { init } from "@sentry/node";
 import dotenv from "dotenv";
 import { MongoClient } from "mongodb";
-import { Telegraf } from "telegraf";
+import { Context, Telegraf } from "telegraf";
 import { anyOf, message } from "telegraf/filters";
 import { setupErrorHandler } from "./src/errors.ts";
 import {
@@ -27,6 +27,7 @@ const {
   MONGODB_URI = "",
 } = process.env;
 
+const stopWords = ["зарабатыват", "Trust", "Wallet", "доход"];
 const mongo = new MongoClient(MONGODB_URI);
 await mongo.connect();
 // Main ========================================================================
@@ -86,6 +87,26 @@ bot.on(message("text"), async (ctx, next) => {
     "Ссылки за буст канала https://t.me/boost/seniorsoftwarevlogger " +
       "или за доллар https://boosty.to/seniorsoftwarevlogger " +
       "\nТекст поста перемещен в карантин @ssv_purge"
+  );
+  return;
+});
+
+// Функция для проверки стоп-слов
+function hasStopWords(ctx: Context): boolean {
+  if (!ctx.message || !("text" in ctx.message)) return false;
+
+  const messageText = ctx.message.text.toLowerCase();
+  return stopWords.some((word) => messageText.includes(word.toLowerCase()));
+}
+
+// Middleware для фильтрации стоп-слов
+bot.on(message("text"), async (ctx, next) => {
+  console.debug("hasStopWords", hasStopWords(ctx));
+  if (!hasStopWords(ctx)) return next();
+
+  deleteMessage(
+    ctx,
+    "Ваше сообщение содержит запрещенные слова и было удалено."
   );
   return;
 });
