@@ -39,6 +39,23 @@ const stopWords = [
   "Wаllеt",
 ];
 
+const similarChars = {
+  a: "а",
+  b: "в",
+  e: "е",
+  "3": "з",
+  u: "и",
+  k: "к",
+  m: "м",
+  h: "н",
+  o: "о",
+  p: "р",
+  c: "с",
+  t: "т",
+  y: "у",
+  x: "х",
+};
+
 const mongo = new MongoClient(MONGODB_URI);
 await mongo.connect();
 // Main ========================================================================
@@ -102,12 +119,26 @@ bot.on(message("text"), async (ctx, next) => {
   return;
 });
 
-// Функция для проверки стоп-слов
+// Modify the hasStopWords function
 function hasStopWords(ctx: Context): boolean {
   if (!ctx.message || !("text" in ctx.message)) return false;
 
   const messageText = ctx.message.text.toLowerCase();
-  return stopWords.some((word) => messageText.includes(word.toLowerCase()));
+  const normalizedText = normalizeText(messageText);
+
+  return stopWords.some(
+    (word) =>
+      normalizedText.includes(word.toLowerCase()) ||
+      messageText.includes(word.toLowerCase())
+  );
+}
+
+// Add this new function to normalize the text
+function normalizeText(text: string): string {
+  return text
+    .split("")
+    .map((char) => similarChars[char] || char)
+    .join("");
 }
 
 // Middleware для фильтрации стоп-слов
