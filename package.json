@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node --experimental-strip-types index.ts",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "train-classifier": "node --experimental-strip-types src/trainClassifier.ts",
+    "classify": "node --experimental-strip-types src/classifyMessage.ts"
   },
   "engines": {
     "node": "22.6"
@@ -17,9 +18,14 @@
     "@sentry/node": "^5.19.0",
     "dotenv": "^8.2.0",
     "mongodb": "^6.8.0",
+    "natural": "^8.0.1",
     "telegraf": "^4.16.3"
   },
   "devDependencies": {
-    "@types/node": "^22.4.0"
+    "@types/jest": "^29.5.13",
+    "@types/node": "^22.4.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
+    "ts-node": "^10.9.1"
   }
 }

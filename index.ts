@@ -10,6 +10,8 @@ import {
   deleteMessage,
   restoreUserRights,
 } from "./src/lib.ts";
+import { classifyMessage } from "./src/classifier.ts";
+import natural from "natural";
 
 // Setup =======================================================================
 
@@ -27,37 +29,23 @@ const {
   MONGODB_URI = "",
 } = process.env;
 
-const stopWords = [
-  "зарабатыват",
-  "зapaбoтoк",
-  "прибыль",
-  "сотрудничеств",
-  "Trust",
-  "Wallet",
-  "доход",
-  "Тrust",
-  "Wаllеt",
-];
-
-const similarChars = {
-  a: "а",
-  b: "в",
-  e: "е",
-  "3": "з",
-  u: "и",
-  k: "к",
-  m: "м",
-  h: "н",
-  o: "о",
-  p: "р",
-  c: "с",
-  t: "т",
-  y: "у",
-  x: "х",
-};
-
 const mongo = new MongoClient(MONGODB_URI);
 await mongo.connect();
+
+let classifier: natural.BayesClassifier;
+
+natural.BayesClassifier.load(
+  "./classifier.json",
+  natural.PorterStemmerRu,
+  (err, classifier) => {
+    if (err) {
+      console.error("Ошибка при загрузке модели:", err);
+    } else {
+      console.log("Модель успешно загружена.");
+      classifier = classifier;
+    }
+  }
+);
 // Main ========================================================================
 
 const bot = new Telegraf(BOT_TOKEN, {
@@ -103,7 +91,7 @@ bot.use(async (ctx, next) => {
 
   deleteMessage(
     ctx,
-    `Под каналом писать нельзя \nТекст поста перемещен в карантин @ssv_purge`
+    `Под каналом писать нельзя \nТекст поста перемещен в крантин @ssv_purge`
   );
 });
 bot.on(message("text"), async (ctx, next) => {
@@ -119,38 +107,62 @@ bot.on(message("text"), async (ctx, next) => {
   return;
 });
 
-// Modify the hasStopWords function
-function hasStopWords(ctx: Context): boolean {
-  if (!ctx.message || !("text" in ctx.message)) return false;
+// Modify the isSpam function
+function isSpam(ctx: Context): boolean {
+  if (!ctx.message || !("text" in ctx.message) || !classifier) return false;
 
-  const messageText = ctx.message.text.toLowerCase();
-  const normalizedText = normalizeText(messageText);
-
-  return stopWords.some(
-    (word) =>
-      normalizedText.includes(word.toLowerCase()) ||
-      messageText.includes(word.toLowerCase())
-  );
+  return classifyMessage(ctx.message.text, classifier) === "spam";
 }
 
-// Add this new function to normalize the text
-function normalizeText(text: string): string {
-  return text
-    .split("")
-    .map((char) => similarChars[char] || char)
-    .join("");
-}
+// Add this type definition for the button callback data
+type DeleteButtonData = {
+  action: "delete";
+  messageId: number;
+  userId: number;
+};
 
-// Middleware для фильтрации стоп-слов
+// Middleware для фильтрации спама
 bot.on(message("text"), async (ctx, next) => {
-  console.debug("hasStopWords", hasStopWords(ctx));
-  if (!hasStopWords(ctx)) return next();
+  console.debug("isSpam", isSpam(ctx));
+  if (!isSpam(ctx)) return next();
 
-  deleteMessage(
-    ctx,
-    "Ваше сообщение содержит запрещенные слова и было удалено."
+  await ctx.reply(
+    "Это сообщение похоже на спам. Если это спам, нажмите кнопку, чтобы удалить его даже если вы не админ.",
+    {
+      reply_markup: {
+        inline_keyboard: [
+          [
+            {
+              text: "Удалить сообщение",
+              callback_data: JSON.stringify({
+                action: "delete",
+                messageId: ctx.message.message_id,
+                userId: ctx.from.id,
+              } as DeleteButtonData),
+            },
+          ],
+        ],
+      },
+    }
   );
-  return;
+});
+
+// Handle the delete button callback
+bot.action(/delete/, async (ctx) => {
+  if (ctx.callbackQuery && "data" in ctx.callbackQuery) {
+    const data = JSON.parse(ctx.callbackQuery.data) as DeleteButtonData;
+
+    if (data.action === "delete") {
+      try {
+        // Delete the original message
+        await ctx.deleteMessage(data.messageId);
+        await ctx.answerCbQuery("Сообщение удалено.");
+      } catch (error) {
+        console.error("Error deleting message:", error);
+        await ctx.answerCbQuery("Не удалось удалить сообщение.");
+      }
+    }
+  }
 });
 
 // Replicate ban across all chats
@@ -222,7 +234,12 @@ const launchOptions =
 bot.launch(
   {
     ...launchOptions,
-    allowedUpdates: ["chat_member", "message", "edited_message"],
+    allowedUpdates: [
+      "chat_member",
+      "message",
+      "edited_message",
+      "callback_query",
+    ],
   },
   () => console.log("BOT STARTED")
 );
