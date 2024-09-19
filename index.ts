@@ -138,9 +138,10 @@ type DeleteButtonData = {
 // Middleware для фильтрации спама
 bot.on(message("text"), async (ctx, next) => {
   const spam = isSpam(ctx.message.text, classifier as natural.BayesClassifier);
-  console.debug("isSpam", spam);
+  console.debug("isSpam", spam, ctx.message.text);
   if (!spam) return next();
 
+  return next();
   await ctx.reply(
     "Это сообщение похоже на спам. Если это спам, нажмите кнопку, чтобы удалить его даже если вы не админ.",
     {
