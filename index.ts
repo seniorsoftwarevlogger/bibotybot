@@ -167,8 +167,10 @@ bot.action(/del:/, async (ctx) => {
   const [action, messageId, chatId, userId, votes] =
     ctx.callbackQuery.data.split(":");
 
+  const filteredVotes = votes.split(",").filter((vote) => vote.trim() !== "");
+
   const votesParsed = Array.from(
-    new Set([...votes.split(","), ctx.callbackQuery.from.id.toString()])
+    new Set([...filteredVotes, ctx.callbackQuery.from.id.toString()])
   );
 
   if (votesParsed.length >= 3) {
