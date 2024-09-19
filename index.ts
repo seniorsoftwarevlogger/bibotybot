@@ -130,7 +130,9 @@ function isSpam(text: string, classifier: natural.BayesClassifier): boolean {
 type DeleteButtonData = {
   action: "delete";
   messageId: number;
+  chatId: number;
   userId: number;
+  votes: string[];
 };
 
 // Middleware для фильтрации спама
@@ -142,15 +144,20 @@ bot.on(message("text"), async (ctx, next) => {
   await ctx.reply(
     "Это сообщение похоже на спам. Если это спам, нажмите кнопку, чтобы удалить его даже если вы не админ.",
     {
+      reply_parameters: {
+        message_id: ctx.message.message_id,
+      },
       reply_markup: {
         inline_keyboard: [
           [
             {
-              text: "Удалить сообщение",
+              text: "Голос за удаление",
               callback_data: JSON.stringify({
                 action: "delete",
                 messageId: ctx.message.message_id,
+                chatId: ctx.chat.id,
                 userId: ctx.from.id,
+                votes: [],
               } as DeleteButtonData),
             },
           ],
@@ -162,22 +169,60 @@ bot.on(message("text"), async (ctx, next) => {
 
 // Handle the delete button callback
 bot.action(/delete/, async (ctx) => {
-  if (ctx.callbackQuery && "data" in ctx.callbackQuery) {
-    const data = JSON.parse(ctx.callbackQuery.data) as DeleteButtonData;
+  if (!ctx.callbackQuery || !("data" in ctx.callbackQuery)) return;
+  const data = JSON.parse(ctx.callbackQuery.data) as DeleteButtonData;
 
-    if (data.action === "delete") {
-      try {
-        // Delete the original message
-        await ctx.deleteMessage(data.messageId);
-        if (ctx.callbackQuery.message?.message_id) {
-          await ctx.deleteMessage(ctx.callbackQuery.message?.message_id);
+  if (data.action !== "delete") return;
+
+  data.votes = Array.from(
+    new Set([...data.votes, ctx.callbackQuery.from.id.toString()])
+  );
+
+  if (data.votes.length >= 3) {
+    try {
+      await ctx.telegram.copyMessage(
+        "@ssv_purge",
+        data.chatId,
+        data.messageId,
+        {
+          disable_notification: true,
         }
-        await ctx.answerCbQuery("Сообщение удалено.");
-      } catch (error) {
-        console.error("Error deleting message:", error);
-        await ctx.answerCbQuery("Не удалось удалить сообщение.");
-      }
+      );
+      // todo: add to the classifier store
+
+      await ctx.deleteMessage(data.messageId);
+      if (ctx.callbackQuery.message?.message_id)
+        await ctx.deleteMessage(ctx.callbackQuery.message?.message_id);
+      await ctx.answerCbQuery("Сообщение удалено.");
+    } catch (error) {
+      console.error("Error deleting message:", error);
+      await ctx.answerCbQuery("Не удалось удалить сообщение.");
     }
+  } else {
+    // edit message to show current votes
+    await ctx.editMessageText(
+      `Это сообщение похоже на спам. Если это спам, проголосуйте, чтобы удалить его даже если вы не админ. Проголосовали: ${data.votes.join(
+        ", "
+      )}`,
+      {
+        reply_markup: {
+          inline_keyboard: [
+            [
+              {
+                text: `Голосов за удаление: ${data.votes.length}/3`,
+                callback_data: JSON.stringify({
+                  action: "delete",
+                  messageId: data.messageId,
+                  chatId: data.chatId,
+                  userId: data.userId,
+                  votes: data.votes,
+                } as DeleteButtonData),
+              },
+            ],
+          ],
+        },
+      }
+    );
   }
 });
 
