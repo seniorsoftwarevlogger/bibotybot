@@ -108,10 +108,16 @@ bot.on(message("text"), async (ctx, next) => {
 });
 
 // Modify the isSpam function
-function isSpam(ctx: Context): boolean {
-  if (!ctx.message || !("text" in ctx.message) || !classifier) return false;
+function isSpam(text: string, classifier: natural.BayesClassifier): boolean {
+  if (!classifier) {
+    console.log("Classifier not loaded");
+    return false;
+  }
 
-  return classifyMessage(ctx.message.text, classifier) === "spam";
+  const result = classifyMessage(text, classifier);
+  console.log("isSpam", result);
+
+  return result === "spam";
 }
 
 // Add this type definition for the button callback data
@@ -123,8 +129,9 @@ type DeleteButtonData = {
 
 // Middleware для фильтрации спама
 bot.on(message("text"), async (ctx, next) => {
-  console.debug("isSpam", isSpam(ctx));
-  if (!isSpam(ctx)) return next();
+  const spam = isSpam(ctx.message.text, classifier);
+  console.debug("isSpam", spam);
+  if (!spam) return next();
 
   await ctx.reply(
     "Это сообщение похоже на спам. Если это спам, нажмите кнопку, чтобы удалить его даже если вы не админ.",
