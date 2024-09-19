@@ -169,10 +169,8 @@ bot.action(/delete/, async (ctx) => {
       try {
         // Delete the original message
         await ctx.deleteMessage(data.messageId);
-        if (ctx.callbackQuery.inline_message_id) {
-          await ctx.deleteMessage(
-            parseInt(ctx.callbackQuery.inline_message_id)
-          );
+        if (ctx.callbackQuery.message?.message_id) {
+          await ctx.deleteMessage(ctx.callbackQuery.message?.message_id);
         }
         await ctx.answerCbQuery("Сообщение удалено.");
       } catch (error) {
