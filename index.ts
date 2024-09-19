@@ -152,13 +152,7 @@ bot.on(message("text"), async (ctx, next) => {
           [
             {
               text: "Голос за удаление",
-              callback_data: JSON.stringify({
-                action: "delete",
-                messageId: ctx.message.message_id,
-                chatId: ctx.chat.id,
-                userId: ctx.from.id,
-                votes: [],
-              } as DeleteButtonData),
+              callback_data: `del:${ctx.message.message_id}:${ctx.chat.id}:${ctx.from.id}:`,
             },
           ],
         ],
@@ -168,29 +162,21 @@ bot.on(message("text"), async (ctx, next) => {
 });
 
 // Handle the delete button callback
-bot.action(/delete/, async (ctx) => {
+bot.action(/del:/, async (ctx) => {
   if (!ctx.callbackQuery || !("data" in ctx.callbackQuery)) return;
-  const data = JSON.parse(ctx.callbackQuery.data) as DeleteButtonData;
+  const [action, messageId, chatId, userId, votes] =
+    ctx.callbackQuery.data.split(":");
 
-  if (data.action !== "delete") return;
-
-  data.votes = Array.from(
-    new Set([...data.votes, ctx.callbackQuery.from.id.toString()])
+  const votesParsed = Array.from(
+    new Set([...votes.split(","), ctx.callbackQuery.from.id.toString()])
   );
 
-  if (data.votes.length >= 3) {
+  if (votesParsed.length >= 3) {
     try {
-      await ctx.telegram.copyMessage(
-        "@ssv_purge",
-        data.chatId,
-        data.messageId,
-        {
-          disable_notification: true,
-        }
-      );
+      await ctx.telegram.copyMessage("@ssv_purge", chatId, parseInt(messageId));
       // todo: add to the classifier store
 
-      await ctx.deleteMessage(data.messageId);
+      await ctx.deleteMessage(parseInt(messageId));
       if (ctx.callbackQuery.message?.message_id)
         await ctx.deleteMessage(ctx.callbackQuery.message?.message_id);
       await ctx.answerCbQuery("Сообщение удалено.");
@@ -201,22 +187,18 @@ bot.action(/delete/, async (ctx) => {
   } else {
     // edit message to show current votes
     await ctx.editMessageText(
-      `Это сообщение похоже на спам. Если это спам, проголосуйте, чтобы удалить его даже если вы не админ. Проголосовали: ${data.votes.join(
-        ", "
-      )}`,
+      `Это сообщение похоже на спам. Если это спам, проголосуйте, чтобы удалить его даже если вы не админ. 
+      
+Проголосовали: ${votesParsed.join(", ")}`,
       {
         reply_markup: {
           inline_keyboard: [
             [
               {
-                text: `Голосов за удаление: ${data.votes.length}/3`,
-                callback_data: JSON.stringify({
-                  action: "delete",
-                  messageId: data.messageId,
-                  chatId: data.chatId,
-                  userId: data.userId,
-                  votes: data.votes,
-                } as DeleteButtonData),
+                text: `Голосов за удаление: ${votesParsed.length}/3`,
+                callback_data: `del:${messageId}:${chatId}:${userId}:${votesParsed.join(
+                  ","
+                )}`,
               },
             ],
           ],
