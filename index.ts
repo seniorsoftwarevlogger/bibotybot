@@ -32,22 +32,26 @@ const {
 const mongo = new MongoClient(MONGODB_URI);
 await mongo.connect();
 
-let classifier: natural.BayesClassifier;
-
-natural.BayesClassifier.load(
-  "./classifier.json",
-  natural.PorterStemmerRu,
-  (err, loadedClassifier) => {
-    if (err) {
-      console.error("Ошибка при загрузке модели:", err);
-    } else if (loadedClassifier) {
-      classifier = loadedClassifier;
-      console.log("Модель успешно загружена.");
-    } else {
-      console.error("Странная третья опция");
+const classifier = await new Promise((resolve, reject) => {
+  natural.BayesClassifier.load(
+    "./classifier.json",
+    natural.PorterStemmerRu,
+    (err, loadedClassifier) => {
+      if (err) {
+        console.error("Ошибка при загрузке модели:", err);
+        reject(err);
+      } else if (loadedClassifier) {
+        console.log("Модель успешно загружена.");
+        resolve(loadedClassifier);
+      } else {
+        console.error("Странная третья опция");
+        reject(new Error("Странная третья опция"));
+      }
     }
-  }
-);
+  );
+}).catch((error) => {
+  console.error("Ошибка при загрузке модели:", error);
+});
 // Main ========================================================================
 
 const bot = new Telegraf(BOT_TOKEN, {
@@ -131,7 +135,7 @@ type DeleteButtonData = {
 
 // Middleware для фильтрации спама
 bot.on(message("text"), async (ctx, next) => {
-  const spam = isSpam(ctx.message.text, classifier);
+  const spam = isSpam(ctx.message.text, classifier as natural.BayesClassifier);
   console.debug("isSpam", spam);
   if (!spam) return next();
 
