@@ -37,12 +37,14 @@ let classifier: natural.BayesClassifier;
 natural.BayesClassifier.load(
   "./classifier.json",
   natural.PorterStemmerRu,
-  (err, classifier) => {
+  (err, loadedClassifier) => {
     if (err) {
       console.error("Ошибка при загрузке модели:", err);
-    } else {
+    } else if (loadedClassifier) {
+      classifier = loadedClassifier;
       console.log("Модель успешно загружена.");
-      classifier = classifier;
+    } else {
+      console.error("Странная третья опция");
     }
   }
 );
