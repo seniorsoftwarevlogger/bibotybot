@@ -10,8 +10,7 @@ import {
   deleteMessage,
   restoreUserRights,
 } from "./src/lib.ts";
-import { classifyMessage } from "./src/classifier.ts";
-import natural from "natural";
+import { classifyMessageOpenAI } from "./src/openaiClassifier.ts";
 
 // Setup =======================================================================
 
@@ -32,26 +31,26 @@ const {
 const mongo = new MongoClient(MONGODB_URI);
 await mongo.connect();
 
-const classifier = await new Promise((resolve, reject) => {
-  natural.BayesClassifier.load(
-    "./classifier.json",
-    natural.PorterStemmerRu,
-    (err, loadedClassifier) => {
-      if (err) {
-        console.error("Ошибка при загрузке модели:", err);
-        reject(err);
-      } else if (loadedClassifier) {
-        console.log("Модель успешно загружена.");
-        resolve(loadedClassifier);
-      } else {
-        console.error("Странная третья опция");
-        reject(new Error("Странная третья опция"));
-      }
-    }
-  );
-}).catch((error) => {
-  console.error("Ошибка при загрузке модели:", error);
-});
+// const classifier = await new Promise((resolve, reject) => {
+//   natural.BayesClassifier.load(
+//     "./classifier.json",
+//     natural.PorterStemmerRu,
+//     (err, loadedClassifier) => {
+//       if (err) {
+//         console.error("Ошибка при загрузке модели:", err);
+//         reject(err);
+//       } else if (loadedClassifier) {
+//         console.log("Модель успешно загружена.");
+//         resolve(loadedClassifier);
+//       } else {
+//         console.error("Странная третья опция");
+//         reject(new Error("Странная третья опция"));
+//       }
+//     }
+//   );
+// }).catch((error) => {
+//   console.error("Ошибка при загрузке модели:", error);
+// });
 // Main ========================================================================
 
 const bot = new Telegraf(BOT_TOKEN, {
@@ -113,35 +112,22 @@ bot.on(message("text"), async (ctx, next) => {
   return;
 });
 
-// Modify the isSpam function
-function isSpam(text: string, classifier: natural.BayesClassifier): boolean {
-  if (!classifier) {
-    console.log("Classifier not loaded");
-    return false;
-  }
-
-  const result = classifyMessage(text, classifier);
+// Replace the existing isSpam function with this one
+async function isSpam(text: string): Promise<boolean> {
+  const result = await classifyMessageOpenAI(text);
   console.log("isSpam", result);
-
-  return result === "spam";
+  return result;
 }
 
-// Add this type definition for the button callback data
-type DeleteButtonData = {
-  action: "delete";
-  messageId: number;
-  chatId: number;
-  userId: number;
-  votes: string[];
-};
-
-// Middleware для фильтрации спама
+// Update the middleware for spam filtering
 bot.on(message("text"), async (ctx, next) => {
-  const spam = isSpam(ctx.message.text, classifier as natural.BayesClassifier);
-  console.debug("isSpam", spam, ctx.message.text);
+  const spam = await isSpam(ctx.message.text);
   if (!spam) return next();
 
-  return next();
+  deleteMessage(ctx, "Сообщение похожее на спам было удалено.");
+
+  return;
+
   await ctx.reply(
     "Это сообщение похоже на спам. Если это спам, нажмите кнопку, чтобы удалить его даже если вы не админ.",
     {
