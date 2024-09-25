@@ -145,7 +145,7 @@ bot.on(message("text"), async (ctx, next) => {
 
     fs.writeFile(
       "/data/goodCitizens.json",
-      JSON.stringify(goodCitizens.toJSON()),
+      JSON.stringify(goodCitizens.saveAsJSON()),
       (err) => {
         if (err) {
           console.error("Error writing goodCitizens.json:", err);
