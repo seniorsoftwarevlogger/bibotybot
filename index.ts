@@ -1,8 +1,7 @@
 import { init } from "@sentry/node";
 import dotenv from "dotenv";
 import { MongoClient } from "mongodb";
-import natural from "natural";
-import { BloomFilter } from "bloom-filters";
+import bloom from "bloom-filters";
 import { Telegraf } from "telegraf";
 import { anyOf, message } from "telegraf/filters";
 import fs from "fs";
@@ -89,7 +88,7 @@ const boostsCache = new Map();
 
 const goodCitizensJson =
   fs.readFileSync("/data/goodCitizens.json", "utf8") || "{}";
-const goodCitizens = BloomFilter.fromJSON(JSON.parse(goodCitizensJson));
+const goodCitizens = bloom.BloomFilter.fromJSON(JSON.parse(goodCitizensJson));
 
 bot.use(async (ctx, next) => {
   const boosted = await boostedChannel(ctx);
