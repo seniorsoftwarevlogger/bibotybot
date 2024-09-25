@@ -86,9 +86,11 @@ setInterval(async () => {
 
 const boostsCache = new Map();
 
-const goodCitizensJson =
-  fs.readFileSync("/data/goodCitizens.json", "utf8") || "{}";
-const goodCitizens = bloom.BloomFilter.fromJSON(JSON.parse(goodCitizensJson));
+const goodCitizens = fs.existsSync("/data/goodCitizens.json")
+  ? bloom.BloomFilter.fromJSON(
+      JSON.parse(fs.readFileSync("/data/goodCitizens.json", "utf8"))
+    )
+  : bloom.BloomFilter.create(1000000, 0.01);
 
 bot.use(async (ctx, next) => {
   const boosted = await boostedChannel(ctx);
