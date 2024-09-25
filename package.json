@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node --experimental-strip-types index.ts",
-    "train-classifier": "node --experimental-strip-types src/trainClassifier.ts",
+    "train": "node --experimental-strip-types src/trainClassifier.ts",
     "classify": "node --experimental-strip-types src/classifyMessage.ts"
   },
   "engines": {
@@ -16,6 +16,7 @@
   "license": "MIT",
   "dependencies": {
     "@sentry/node": "^5.19.0",
+    "bloom-filters": "^3.0.2",
     "dotenv": "^8.2.0",
     "mongodb": "^6.8.0",
     "natural": "^8.0.1",

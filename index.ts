@@ -1,8 +1,11 @@
 import { init } from "@sentry/node";
 import dotenv from "dotenv";
 import { MongoClient } from "mongodb";
-import { Context, Telegraf } from "telegraf";
+import natural from "natural";
+import { BloomFilter } from "bloom-filters";
+import { Telegraf } from "telegraf";
 import { anyOf, message } from "telegraf/filters";
+import fs from "fs";
 import { setupErrorHandler } from "./src/errors.ts";
 import {
   blockUser,
@@ -31,10 +34,14 @@ const {
 const mongo = new MongoClient(MONGODB_URI);
 await mongo.connect();
 
+// const storage = new natural.StorageBackend(natural.STORAGE_TYPES.MONGODB);
+
 // const classifier = await new Promise((resolve, reject) => {
-//   natural.BayesClassifier.load(
-//     "./classifier.json",
+//   natural.BayesClassifier.loadFrom(
+//     "classifier",
+//     // @ts-expect-error: Ignoring type errors due to incorrect library type definitions
 //     natural.PorterStemmerRu,
+//     storage,
 //     (err, loadedClassifier) => {
 //       if (err) {
 //         console.error("Ошибка при загрузке модели:", err);
@@ -51,6 +58,7 @@ await mongo.connect();
 // }).catch((error) => {
 //   console.error("Ошибка при загрузке модели:", error);
 // });
+
 // Main ========================================================================
 
 const bot = new Telegraf(BOT_TOKEN, {
@@ -78,6 +86,10 @@ setInterval(async () => {
 }, 1000 * 60 * 60);
 
 const boostsCache = new Map();
+
+const goodCitizensJson =
+  fs.readFileSync("/data/goodCitizens.json", "utf8") || "{}";
+const goodCitizens = BloomFilter.fromJSON(JSON.parse(goodCitizensJson));
 
 bot.use(async (ctx, next) => {
   const boosted = await boostedChannel(ctx);
@@ -121,8 +133,27 @@ async function isSpam(text: string): Promise<boolean> {
 
 // Update the middleware for spam filtering
 bot.on(message("text"), async (ctx, next) => {
+  if (goodCitizens.has(ctx.message.from.id.toString())) {
+    // check if the bloom filter has the user id, means that the user posted a message that was classified as not spam
+    return next();
+  }
+
   const spam = await isSpam(ctx.message.text);
-  if (!spam) return next();
+  if (!spam) {
+    goodCitizens.add(ctx.message.from.id.toString());
+
+    fs.writeFile(
+      "/data/goodCitizens.json",
+      JSON.stringify(goodCitizens.toJSON()),
+      (err) => {
+        if (err) {
+          console.error("Error writing goodCitizens.json:", err);
+        }
+      }
+    );
+
+    return next();
+  }
 
   deleteMessage(ctx, "Сообщение похожее на спам было удалено.");
 
