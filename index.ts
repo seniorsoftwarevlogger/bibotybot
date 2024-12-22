@@ -146,6 +146,21 @@ async function isSpam(text: string): Promise<boolean> {
   return result;
 }
 
+bot.on(message("text"), async (ctx, next) => {
+  // delete if the message has a lots of custom emojis
+  if (ctx.message.entities?.some((entity) => entity.type === "custom_emoji")) {
+    const emojis = ctx.message.entities
+      .filter((entity) => entity.type === "custom_emoji")
+      .map((entity) => entity.custom_emoji_id);
+
+    if (emojis.length > 5) {
+      deleteMessage(ctx, "Сообщение содержит много эмодзи, удалено.");
+      return;
+    }
+  }
+  return next();
+});
+
 // Update the middleware for spam filtering
 bot.on(message("text"), async (ctx, next) => {
   if (goodCitizens.has(ctx.message.from.id.toString())) {
