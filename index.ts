@@ -67,6 +67,20 @@ bot.catch((error) => {
   console.error(error);
 });
 
+// After bot.catch and before other middleware
+bot.use(async (ctx, next) => {
+  // Check if it's a private/direct message
+  if (ctx.chat?.type === "private") {
+    await ctx.reply(
+      `Debug info:\n\`\`\`json\n${JSON.stringify(ctx.update, null, 2)}\`\`\``,
+      {
+        parse_mode: "Markdown",
+      }
+    );
+  }
+  return next();
+});
+
 const myChannels = ME.split(",");
 let FAMILY = await mongo
   .db("family")
