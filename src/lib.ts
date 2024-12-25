@@ -57,14 +57,14 @@ export function deleteMediaMessage(ctx) {
     .finally(() => console.log("DELETED", ctx.message.message_id));
 }
 export function deleteMessage(ctx, warningMessage) {
-  ctx.telegram
-    .sendMessage(ctx.chat.id, warningMessage, {
-      link_preview_options: { is_disabled: true },
-      message_id: getReplyToChannelId(ctx.message.reply_to_message),
-    })
-    .then((botReply) => {
-      setTimeout(() => ctx.deleteMessage(botReply.message_id), 60000);
-    });
+  // ctx.telegram
+  //   .sendMessage(ctx.chat.id, warningMessage, {
+  //     link_preview_options: { is_disabled: true },
+  //     message_id: getReplyToChannelId(ctx.message.reply_to_message),
+  //   })
+  //   .then((botReply) => {
+  //     setTimeout(() => ctx.deleteMessage(botReply.message_id), 60000);
+  //   });
 
   return ctx.telegram
     .copyMessage(`@ssv_purge`, ctx.chat.id, ctx.message.message_id, {
