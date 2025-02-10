@@ -184,7 +184,9 @@ bot.on(message("text"), async (ctx, next) => {
 
     return next();
   }
-
+  blockUser(ctx.telegram, ctx.chat.id, ctx.message.from.id).catch((error) => {
+    console.error("Error blocking user:", error);
+  });
   deleteMessage(ctx, "Сообщение похожее на спам было удалено.");
 
   return;
