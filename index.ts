@@ -100,11 +100,7 @@ setInterval(async () => {
 
 const boostsCache = new Map();
 
-const goodCitizens = fs.existsSync("/data/goodCitizens.json")
-  ? bloom.BloomFilter.fromJSON(
-      JSON.parse(fs.readFileSync("/data/goodCitizens.json", "utf8"))
-    )
-  : bloom.BloomFilter.create(1000000, 0.01);
+const goodCitizens = bloom.BloomFilter.create(1000000, 0.01);
 
 bot.use(async (ctx, next) => {
   const boosted = await boostedChannel(ctx);
@@ -141,9 +137,7 @@ bot.on(message("text"), async (ctx, next) => {
 
 // Replace the existing isSpam function with this one
 async function isSpam(text: string): Promise<boolean> {
-  const result = await classifyMessageOpenAI(text);
-  console.log("isSpam", result);
-  return result;
+  return await classifyMessageOpenAI(text);
 }
 
 bot.on(message("text"), async (ctx, next) => {
@@ -171,16 +165,6 @@ bot.on(message("text"), async (ctx, next) => {
   const spam = await isSpam(ctx.message.text);
   if (!spam) {
     goodCitizens.add(ctx.message.from.id.toString());
-
-    fs.writeFile(
-      "/data/goodCitizens.json",
-      JSON.stringify(goodCitizens.saveAsJSON()),
-      (err) => {
-        if (err) {
-          console.error("Error writing goodCitizens.json:", err);
-        }
-      }
-    );
 
     return next();
   }
