@@ -109,13 +109,20 @@ bot.use(async (ctx, next) => {
 
   console.log(`${id}: me ${isMe(ctx)}, boosted ${boosted}, family ${family}`);
 
-  if (isMe(ctx) || boosted || family) return; // stop processing
+  if (isMe(ctx) || family) return; // stop processing
+
+  // Store boosted status for later middleware
+  ctx.state = ctx.state || {};
+  ctx.state.boosted = boosted;
 
   return next();
 });
 bot.use(async (ctx, next) => {
   console.debug("isChannelBot", isChannelBot(ctx));
   if (!isChannelBot(ctx)) return next();
+
+  // Boosted users can post as channels
+  if (ctx.state?.boosted) return next();
 
   deleteMessage(
     ctx,
@@ -125,6 +132,9 @@ bot.use(async (ctx, next) => {
 bot.on(message("text"), async (ctx, next) => {
   console.debug("hasLinks", hasLinks(ctx));
   if (!hasLinks(ctx)) return next();
+
+  // Boosted users can post links
+  if (ctx.state?.boosted) return next();
 
   deleteMessage(
     ctx,
@@ -300,6 +310,9 @@ bot.on(
     )
   ),
   async (ctx) => {
+    // Boosted users can post media
+    if (ctx.state?.boosted) return;
+    
     deleteMediaMessage(ctx);
     return;
   }
