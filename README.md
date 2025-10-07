@@ -53,13 +53,13 @@ Admins can control whether links are allowed in specific threads by using comman
 #### How to Allow Links in a Thread
 
 1. Reply to any message in the thread where you want to allow links
-2. Send the command: `@bibotybot/allowLinks`
+2. Send the command: `/allowLinks`
 3. The bot will confirm that links are now allowed in that thread
 
 #### How to Block Links in a Thread
 
 1. Reply to any message in the thread where you want to block links
-2. Send the command: `@bibotybot/blockLinks`
+2. Send the command: `/blockLinks`
 3. The bot will confirm that links are now blocked in that thread
 
 **Note**: Only administrators can use these commands. The settings persist across bot restarts and are stored in the database.
