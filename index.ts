@@ -139,7 +139,7 @@ bot.use(async (ctx, next) => {
 });
 
 // Command handler for allowing links in a thread
-bot.command("allowLinks", async (ctx) => {
+bot.command("allowlinks", async (ctx) => {
   // Check if the message is a reply (in a thread)
   const threadId = ctx.message.reply_to_message?.message_id;
   if (!threadId) {
@@ -167,7 +167,7 @@ bot.command("allowLinks", async (ctx) => {
   await ctx.reply("Ссылки разрешены в этом треде.");
 });
 
-bot.command("blockLinks", async (ctx) => {
+bot.command("blocklinks", async (ctx) => {
   // Check if the message is a reply (in a thread)
   const threadId = ctx.message.reply_to_message?.message_id;
   if (!threadId) {
