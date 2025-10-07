@@ -102,6 +102,14 @@ const boostsCache = new Map();
 
 const goodCitizens = bloom.BloomFilter.create(1000000, 0.01);
 
+// Store allowed threads for links (in memory cache)
+const allowedThreads = new Set<string>();
+
+// Load allowed threads from database on startup
+const allowedThreadsCollection = mongo.db("bot").collection("allowed_threads");
+const loadedThreads = await allowedThreadsCollection.find({}).toArray();
+loadedThreads.forEach((thread) => allowedThreads.add(thread.threadId));
+
 bot.use(async (ctx, next) => {
   const boosted = await boostedChannel(ctx);
   const family = FAMILY.includes(ctx.message?.from?.username);
@@ -129,9 +137,80 @@ bot.use(async (ctx, next) => {
     `Под каналом писать нельзя \nТекст поста перемещен в крантин @ssv_purge`
   );
 });
+
+// Command handler for allowing links in a thread
+bot.on(message("text"), async (ctx, next) => {
+  const text = ctx.message.text;
+  
+  if (text === "@bibotybot/allowLinks") {
+    // Check if the message is a reply (in a thread)
+    const threadId = ctx.message.reply_to_message?.message_id;
+    if (!threadId) {
+      await ctx.reply("Эта команда должна быть отправлена в ответ на сообщение в треде.");
+      return;
+    }
+    
+    // Check if user is admin
+    const member = await ctx.telegram.getChatMember(ctx.chat.id, ctx.from.id);
+    if (member.status !== "administrator" && member.status !== "creator") {
+      await ctx.reply("Только администраторы могут использовать эту команду.");
+      return;
+    }
+    
+    const threadKey = `${ctx.chat.id}:${threadId}`;
+    allowedThreads.add(threadKey);
+    
+    // Save to database
+    await allowedThreadsCollection.updateOne(
+      { threadId: threadKey },
+      { $set: { threadId: threadKey, chatId: ctx.chat.id, messageId: threadId } },
+      { upsert: true }
+    );
+    
+    await ctx.reply("Ссылки разрешены в этом треде.");
+    return;
+  }
+  
+  if (text === "@bibotybot/blockLinks") {
+    // Check if the message is a reply (in a thread)
+    const threadId = ctx.message.reply_to_message?.message_id;
+    if (!threadId) {
+      await ctx.reply("Эта команда должна быть отправлена в ответ на сообщение в треде.");
+      return;
+    }
+    
+    // Check if user is admin
+    const member = await ctx.telegram.getChatMember(ctx.chat.id, ctx.from.id);
+    if (member.status !== "administrator" && member.status !== "creator") {
+      await ctx.reply("Только администраторы могут использовать эту команду.");
+      return;
+    }
+    
+    const threadKey = `${ctx.chat.id}:${threadId}`;
+    allowedThreads.delete(threadKey);
+    
+    // Remove from database
+    await allowedThreadsCollection.deleteOne({ threadId: threadKey });
+    
+    await ctx.reply("Ссылки заблокированы в этом треде.");
+    return;
+  }
+  
+  return next();
+});
+
 bot.on(message("text"), async (ctx, next) => {
   console.debug("hasLinks", hasLinks(ctx));
   if (!hasLinks(ctx)) return next();
+
+  // Check if links are allowed in this thread
+  const threadId = ctx.message.reply_to_message?.message_id;
+  if (threadId) {
+    const threadKey = `${ctx.chat.id}:${threadId}`;
+    if (allowedThreads.has(threadKey)) {
+      return next();
+    }
+  }
 
   // Boosted users can post links
   if (ctx.state?.boosted) return next();
