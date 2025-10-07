@@ -106,7 +106,7 @@ const goodCitizens = bloom.BloomFilter.create(1000000, 0.01);
 const allowedThreads = new Set<string>();
 
 // Load allowed threads from database on startup
-const allowedThreadsCollection = mongo.db("bot").collection("allowed_threads");
+const allowedThreadsCollection = mongo.db("family").collection("allowed_threads");
 const loadedThreads = await allowedThreadsCollection.find({}).toArray();
 loadedThreads.forEach((thread) => allowedThreads.add(thread.threadId));
 
