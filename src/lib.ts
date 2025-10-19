@@ -73,6 +73,7 @@ export function deleteMessage(ctx, warningMessage) {
     .then((res) =>
       ctx
         .deleteMessage(ctx.message.message_id)
+        .then(() => blockUser(ctx.telegram, ctx.chat.id, ctx.message.from.id))
         .catch((e) => console.log("CANT DELETE:", ctx.message, e))
         .finally(() => console.log("DELETED", ctx.message.message_id))
     );
