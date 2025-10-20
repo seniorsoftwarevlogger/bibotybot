@@ -1,7 +1,7 @@
 export function blockUser(telegram, chatId, userId) {
   return telegram.restrictChatMember(chatId, userId, {
     permissions: {
-      can_send_messages: true,
+      can_send_messages: false,
       can_send_audios: false,
       can_send_documents: false,
       can_send_photos: false,
