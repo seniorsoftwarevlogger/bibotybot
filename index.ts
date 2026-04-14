@@ -137,6 +137,11 @@ bot.use(async (ctx, next) => {
     `Под каналом писать нельзя \nТекст поста перемещен в крантин @ssv_purge`
   );
 });
+bot.use(async (ctx, next) => {
+  if (!ctx.message || !("external_reply" in ctx.message)) return next();
+
+  deleteMessage(ctx, "Сообщение с внешней ссылкой удалено.");
+});
 
 // Command handler for allowing links in a thread
 bot.command("allowlinks", async (ctx) => {
@@ -146,24 +151,24 @@ bot.command("allowlinks", async (ctx) => {
     await ctx.reply("Эта команда должна быть отправлена в ответ на сообщение в треде.");
     return;
   }
-  
+
   // Check if user is admin
   const member = await ctx.telegram.getChatMember(ctx.chat.id, ctx.from.id);
   if (member.status !== "administrator" && member.status !== "creator") {
     await ctx.reply("Только администраторы могут использовать эту команду.");
     return;
   }
-  
+
   const threadKey = `${ctx.chat.id}:${threadId}`;
   allowedThreads.add(threadKey);
-  
+
   // Save to database
   await allowedThreadsCollection.updateOne(
     { threadId: threadKey },
     { $set: { threadId: threadKey, chatId: ctx.chat.id, messageId: threadId } },
     { upsert: true }
   );
-  
+
   await ctx.reply("Ссылки разрешены в этом треде.");
 });
 
@@ -174,23 +179,22 @@ bot.command("blocklinks", async (ctx) => {
     await ctx.reply("Эта команда должна быть отправлена в ответ на сообщение в треде.");
     return;
   }
-  
+
   // Check if user is admin
   const member = await ctx.telegram.getChatMember(ctx.chat.id, ctx.from.id);
   if (member.status !== "administrator" && member.status !== "creator") {
     await ctx.reply("Только администраторы могут использовать эту команду.");
     return;
   }
-  
+
   const threadKey = `${ctx.chat.id}:${threadId}`;
   allowedThreads.delete(threadKey);
-  
+
   // Remove from database
   await allowedThreadsCollection.deleteOne({ threadId: threadKey });
-  
+
   await ctx.reply("Ссылки заблокированы в этом треде.");
 });
-
 bot.on(message("text"), async (ctx, next) => {
   console.debug("hasLinks", hasLinks(ctx));
   if (!hasLinks(ctx)) return next();
