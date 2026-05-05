@@ -329,10 +329,6 @@ bot.action(/del:/, async (ctx) => {
   }
 });
 
-
-  }
-});
-
 // Reaction spam tracking: ban users who repeat the same reaction on multiple messages
 const reactionTracker = new Map<string, Set<number>>();
 
