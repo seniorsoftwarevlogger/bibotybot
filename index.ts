@@ -329,6 +329,55 @@ bot.action(/del:/, async (ctx) => {
   }
 });
 
+
+  }
+});
+
+// Reaction spam tracking: ban users who repeat the same reaction on multiple messages
+const reactionTracker = new Map<string, Set<number>>();
+
+function reactionKey(reaction: { type: string; emoji?: string; custom_emoji_id?: string }) {
+  return reaction.type === "custom_emoji"
+    ? `custom:${reaction.custom_emoji_id}`
+    : `emoji:${reaction.emoji}`;
+}
+
+bot.on("message_reaction", async (ctx) => {
+  const upd = ctx.update.message_reaction;
+  const userId = upd.user?.id;
+  if (!userId) return; // anonymous channel reactions are not attributed to a user
+
+  if (upd.user?.username && FAMILY.includes(upd.user.username)) return;
+
+  const chatId = upd.chat.id;
+  const messageId = upd.message_id;
+
+  const oldKeys = new Set((upd.old_reaction || []).map(reactionKey));
+  const addedKeys = (upd.new_reaction || [])
+    .map(reactionKey)
+    .filter((k) => !oldKeys.has(k));
+
+  for (const key of addedKeys) {
+    const trackKey = `${chatId}:${userId}:${key}`;
+    let messages = reactionTracker.get(trackKey);
+    if (!messages) {
+      messages = new Set<number>();
+      reactionTracker.set(trackKey, messages);
+    }
+    messages.add(messageId);
+
+    if (messages.size > 1) {
+      console.log(
+        `Reaction spam: user ${userId} used ${key} on ${messages.size} messages in chat ${chatId}, banning`
+      );
+      await ctx.telegram.banChatMember(chatId, userId).catch((error) => {
+        console.error(`Failed to ban user ${userId} for reaction spam:`, error);
+      });
+      reactionTracker.delete(trackKey);
+    }
+  }
+});
+
 // Replicate ban across all chats
 bot.on("chat_member", async (ctx) => {
   if (ctx.update.chat_member?.new_chat_member?.status === "kicked") {
@@ -406,6 +455,7 @@ bot.launch(
       "message",
       "edited_message",
       "callback_query",
+      "message_reaction",
     ],
   },
   () => console.log("BOT STARTED")
