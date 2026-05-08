@@ -139,6 +139,7 @@ bot.use(async (ctx, next) => {
 });
 bot.use(async (ctx, next) => {
   if (!ctx.message || !("external_reply" in ctx.message)) return next();
+  if (isOwnChannelExternalReply(ctx)) return next();
 
   deleteMessage(ctx, "Сообщение с внешней ссылкой удалено.");
 });
@@ -478,6 +479,28 @@ function hasLinks(ctx) {
   if (!ctx.message) return false;
   return ctx.message.entities?.some(
     (entity) => entity.type === "url" || entity.type === "text_link"
+  );
+}
+function isOwnChannelExternalReply(ctx) {
+  const externalReply = ctx.message?.external_reply;
+  const originChat =
+    externalReply?.origin && "chat" in externalReply.origin
+      ? externalReply.origin.chat
+      : null;
+  const replyChat = externalReply?.chat;
+
+  if (!originChat?.id || !replyChat?.id || originChat.id !== replyChat.id) {
+    return false;
+  }
+
+  const replyToMessage = ctx.message?.reply_to_message;
+  if (replyToMessage?.chat?.id !== ctx.message?.chat.id) return false;
+
+  const repliedChannelId = replyToMessage?.sender_chat?.id;
+  if (repliedChannelId !== replyChat.id) return false;
+
+  return [originChat.username, replyChat.username].some(
+    (username) => username && myChannels.includes(username)
   );
 }
 async function boostedChannel(ctx) {
