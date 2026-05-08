@@ -330,13 +330,11 @@ bot.action(/del:/, async (ctx) => {
   }
 });
 
-// Reaction spam tracking: ban users who repeat the same reaction on multiple messages
-const reactionTracker = new Map<string, Set<number>>();
+const CLOWN_REACTION = "🤡";
+const ONE_DAY_IN_SECONDS = 24 * 60 * 60;
 
-function reactionKey(reaction: { type: string; emoji?: string; custom_emoji_id?: string }) {
-  return reaction.type === "custom_emoji"
-    ? `custom:${reaction.custom_emoji_id}`
-    : `emoji:${reaction.emoji}`;
+function isClownReaction(reaction: { type: string; emoji?: string }) {
+  return reaction.type === "emoji" && reaction.emoji === CLOWN_REACTION;
 }
 
 bot.on("message_reaction", async (ctx) => {
@@ -347,31 +345,38 @@ bot.on("message_reaction", async (ctx) => {
   if (upd.user?.username && FAMILY.includes(upd.user.username)) return;
 
   const chatId = upd.chat.id;
-  const messageId = upd.message_id;
 
-  const oldKeys = new Set((upd.old_reaction || []).map(reactionKey));
-  const addedKeys = (upd.new_reaction || [])
-    .map(reactionKey)
-    .filter((k) => !oldKeys.has(k));
+  const hadClownReaction = (upd.old_reaction || []).some(isClownReaction);
+  const addedClownReaction =
+    !hadClownReaction && (upd.new_reaction || []).some(isClownReaction);
 
-  for (const key of addedKeys) {
-    const trackKey = `${chatId}:${userId}:${key}`;
-    let messages = reactionTracker.get(trackKey);
-    if (!messages) {
-      messages = new Set<number>();
-      reactionTracker.set(trackKey, messages);
-    }
-    messages.add(messageId);
-
-    if (messages.size > 1) {
-      console.log(
-        `Reaction spam: user ${userId} used ${key} on ${messages.size} messages in chat ${chatId}, banning`
-      );
-      await ctx.telegram.banChatMember(chatId, userId).catch((error) => {
-        console.error(`Failed to ban user ${userId} for reaction spam:`, error);
+  if (addedClownReaction) {
+    const untilDate = Math.floor(Date.now() / 1000) + ONE_DAY_IN_SECONDS;
+    console.log(
+      `Clown reaction trap: muting user ${userId} in chat ${chatId} for 24 hours`
+    );
+    await ctx.telegram
+      .restrictChatMember(chatId, userId, {
+        until_date: untilDate,
+        permissions: {
+          can_send_messages: false,
+          can_send_audios: false,
+          can_send_documents: false,
+          can_send_photos: false,
+          can_send_videos: false,
+          can_send_video_notes: false,
+          can_send_voice_notes: false,
+          can_send_polls: false,
+          can_send_other_messages: false,
+          can_add_web_page_previews: false,
+        },
+      })
+      .catch((error) => {
+        console.error(
+          `Failed to mute user ${userId} for clown reaction trap:`,
+          error
+        );
       });
-      reactionTracker.delete(trackKey);
-    }
   }
 });
 
