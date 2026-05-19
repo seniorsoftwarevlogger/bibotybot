@@ -10,6 +10,7 @@ import {
   blockUser,
   deleteMediaMessage,
   deleteMessage,
+  deleteUserReaction,
   muteFor24h,
   restoreUserRights,
 } from "./src/lib.ts";
@@ -353,6 +354,16 @@ bot.action(/del:/, async (ctx) => {
 
 const CLOWN_REACTION = "🤡";
 
+// Repeat early-reaction within this window escalates from "just delete" to a mute.
+const REACTION_STRIKE_WINDOW_MS = 60 * 60 * 1000;
+const reactionStrikes = new Map<string, number>();
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, expiresAt] of reactionStrikes) {
+    if (expiresAt <= now) reactionStrikes.delete(key);
+  }
+}, 10 * 60 * 1000);
+
 function isClownReaction(reaction: { type: string; emoji?: string }) {
   return reaction.type === "emoji" && reaction.emoji === CLOWN_REACTION;
 }
@@ -386,21 +397,47 @@ bot.on("message_reaction", async (ctx) => {
   }
 
   // Reactions are gated behind a small message threshold to keep bot reaction
-  // farms out. Anyone who hasn't earned the right and adds a reaction gets
-  // muted for 24h — same lever as the clown trap, since the Bot API can't
-  // remove someone else's reaction.
+  // farms out. First strike: silently remove the reaction. Repeat within the
+  // strike window: 24h mute on top.
   const reactionAdded = newReactions.length > oldReactions.length;
   if (!reactionAdded) return;
 
   const level = await getLevel(chatId, userId);
   if (level.canReact) return;
 
-  console.log(
-    `Reaction gate: muting user ${userId} in chat ${chatId} for 24 hours (${level.messageCount}/${THRESHOLDS.react} messages)`
+  const messageId = upd.message_id;
+  await deleteUserReaction(ctx.telegram, chatId, messageId, userId).catch(
+    (error) => {
+      console.error(
+        `Failed to delete reaction by user ${userId} on message ${messageId}:`,
+        error
+      );
+    }
   );
-  await muteFor24h(ctx.telegram, chatId, userId).catch((error) => {
-    console.error(`Failed to mute user ${userId} for early reaction:`, error);
-  });
+
+  const strikeKey = `${chatId}:${userId}`;
+  const now = Date.now();
+  const previousStrike = reactionStrikes.get(strikeKey);
+  const isRepeat = previousStrike !== undefined && previousStrike > now;
+
+  if (isRepeat) {
+    console.log(
+      `Reaction gate: muting repeat offender ${userId} in chat ${chatId} (${level.messageCount}/${THRESHOLDS.react} messages)`
+    );
+    reactionStrikes.delete(strikeKey);
+    await muteFor24h(ctx.telegram, chatId, userId).catch((error) => {
+      console.error(
+        `Failed to mute user ${userId} for repeat early reaction:`,
+        error
+      );
+    });
+    return;
+  }
+
+  reactionStrikes.set(strikeKey, now + REACTION_STRIKE_WINDOW_MS);
+  console.log(
+    `Reaction gate: removed reaction by ${userId} in chat ${chatId} (${level.messageCount}/${THRESHOLDS.react} messages, first strike)`
+  );
 });
 
 // Replicate ban across all chats

@@ -34,6 +34,17 @@ export function muteFor24h(telegram, chatId, userId) {
   });
 }
 
+// Bot API methods added in 9.x — deleteMessageReaction (and deleteAllMessageReactions)
+// aren't wrapped by Telegraf 4.16.3 yet, so we hit them through the raw callApi
+// escape hatch. Requires the bot to have the 'can_delete_messages' admin right.
+export function deleteUserReaction(telegram, chatId, messageId, userId) {
+  return (telegram as any).callApi("deleteMessageReaction", {
+    chat_id: chatId,
+    message_id: messageId,
+    user_id: userId,
+  });
+}
+
 export function restoreUserRights(telegram, chatId, userId) {
   telegram.restrictChatMember(chatId, userId, {
     permissions: {
