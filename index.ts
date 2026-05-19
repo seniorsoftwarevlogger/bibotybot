@@ -108,6 +108,14 @@ const boostsCache = new Map();
 
 const goodCitizens = bloom.BloomFilter.create(1000000, 0.01);
 
+function isStatCommand(ctx) {
+  return /^\/stat(?:@\w+)?(?:\s|$)/.test(ctx.message?.text ?? "");
+}
+
+function boostCacheKey(channelId, userId) {
+  return `${channelId}:${userId}`;
+}
+
 // Store allowed threads for links (in memory cache)
 const allowedThreads = new Set<string>();
 
@@ -133,7 +141,7 @@ bot.use(async (ctx, next) => {
     }, media ${level?.canMedia ?? "n/a"}`
   );
 
-  if (isMe(ctx) || family) return; // stop processing
+  if ((isMe(ctx) || family) && !isStatCommand(ctx)) return; // stop processing
 
   ctx.state = ctx.state || {};
   ctx.state.boosted = boosted;
@@ -215,6 +223,32 @@ bot.command("blocklinks", async (ctx) => {
 
   await ctx.reply("Ссылки заблокированы в этом треде.");
 });
+
+bot.command("stat", async (ctx) => {
+  const target = ctx.message.reply_to_message?.from ?? ctx.from;
+  if (!target) {
+    await ctx.reply("Не могу определить пользователя.");
+    return;
+  }
+
+  const level = await getLevel(ctx.chat.id, target.id);
+  const boosted = await boostedUser(ctx.telegram, ctx.message, target.id);
+  const family = Boolean(target.username && FAMILY.includes(target.username));
+  const name = target.username ? `@${target.username}` : target.first_name;
+
+  await ctx.reply(
+    [
+      `Статистика ${name}:`,
+      `Сообщений: ${level.messageCount}`,
+      `Реакции: ${level.canReact ? "можно" : `нужно ${THRESHOLDS.react}`}`,
+      `Ссылки: ${level.canLink ? "можно" : `нужно ${THRESHOLDS.link}`}`,
+      `Медиа: ${level.canMedia ? "можно" : `нужно ${THRESHOLDS.media}`}`,
+      `Буст: ${boosted ? "есть" : "нет"}`,
+      `Family: ${family ? "да" : "нет"}`,
+    ].join("\n")
+  );
+});
+
 bot.on(message("text"), async (ctx, next) => {
   console.debug("hasLinks", hasLinks(ctx));
   if (!hasLinks(ctx)) return next();
@@ -474,14 +508,14 @@ bot.on("chat_boost", (ctx) => {
   console.log("chat_boost", JSON.stringify(ctx.update));
   const userId = ctx.update.chat_boost.boost.source.user?.id;
   restoreUserRights(ctx.telegram, ctx.chat.id, userId);
-  boostsCache.set([ctx.chat.id, userId], true);
+  boostsCache.set(boostCacheKey(ctx.chat.id, userId), true);
 });
 
 bot.on("removed_chat_boost", (ctx) => {
   console.log("removed_chat_boost", JSON.stringify(ctx.update));
   const userId = ctx.update.removed_chat_boost.source.user?.id;
   blockUser(ctx.telegram, ctx.chat.id, userId);
-  boostsCache.set([ctx.chat.id, userId], false);
+  boostsCache.set(boostCacheKey(ctx.chat.id, userId), false);
 });
 
 // Delete media messages
@@ -589,13 +623,18 @@ async function boostedChannel(ctx) {
   const userId = ctx.message.from?.id;
   if (!userId) return false;
 
+  return boostedUser(ctx.telegram, ctx.message, userId);
+}
+
+async function boostedUser(telegram, message, userId) {
   const channelId =
-    ctx.message.reply_to_message?.sender_chat?.id || "@seniorsoftwarevlogger";
+    message.reply_to_message?.sender_chat?.id || "@seniorsoftwarevlogger";
+  const cacheKey = boostCacheKey(channelId, userId);
 
-  const chacheHit = boostsCache.get([channelId, userId]);
-  if (chacheHit !== undefined) return chacheHit;
+  const cacheHit = boostsCache.get(cacheKey);
+  if (cacheHit !== undefined) return cacheHit;
 
-  const boostsById = (await ctx.telegram
+  const boostsById = (await telegram
     .getUserChatBoosts(channelId, userId)
     .catch((e) => console.log(e))) || { boosts: [] };
 
@@ -603,7 +642,7 @@ async function boostedChannel(ctx) {
     (b) => b.expiration_date * 1000 > Date.now()
   );
 
-  boostsCache.set([channelId, userId], boosted);
+  boostsCache.set(cacheKey, boosted);
 
   return boosted;
 }
