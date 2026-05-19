@@ -109,7 +109,11 @@ const boostsCache = new Map();
 const goodCitizens = bloom.BloomFilter.create(1000000, 0.01);
 
 function isStatCommand(ctx) {
-  return /^\/stat(?:@\w+)?(?:\s|$)/.test(ctx.message?.text ?? "");
+  const text = ctx.message?.text ?? "";
+  return (
+    /^\/stat(?:@\w+)?(?:\s|$)/.test(text) ||
+    /^@bibotybot\/stat(?:\s|$)/i.test(text)
+  );
 }
 
 function boostCacheKey(channelId, userId) {
@@ -224,7 +228,7 @@ bot.command("blocklinks", async (ctx) => {
   await ctx.reply("Ссылки заблокированы в этом треде.");
 });
 
-bot.command("stat", async (ctx) => {
+async function replyWithStat(ctx) {
   const target = ctx.message.reply_to_message?.from ?? ctx.from;
   if (!target) {
     await ctx.reply("Не могу определить пользователя.");
@@ -247,7 +251,10 @@ bot.command("stat", async (ctx) => {
       `Family: ${family ? "да" : "нет"}`,
     ].join("\n")
   );
-});
+}
+
+bot.command("stat", replyWithStat);
+bot.hears(/^@bibotybot\/stat(?:\s|$)/i, replyWithStat);
 
 bot.on(message("text"), async (ctx, next) => {
   console.debug("hasLinks", hasLinks(ctx));
@@ -557,6 +564,14 @@ const launchOptions =
   typeof WEBHOOK_URL === "string"
     ? { webhook: { domain: WEBHOOK_URL } }
     : { polling: { timeout: 30, limit: 10 } };
+
+await bot.telegram
+  .setMyCommands([
+    { command: "allowlinks", description: "allow links" },
+    { command: "blocklinks", description: "block links" },
+    { command: "stat", description: "show user stats" },
+  ])
+  .catch((error) => console.error("Failed to set bot commands:", error));
 
 bot.launch(
   {
