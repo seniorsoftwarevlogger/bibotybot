@@ -487,22 +487,19 @@ bot.on("removed_chat_boost", (ctx) => {
 // Delete media messages
 bot.on(
   anyOf(
-    message(
-      "photo",
-      "video",
-      "document",
-      "audio",
-      "voice",
-      "video_note",
-      "animation",
-      "poll",
-      "sticker",
-      "location",
-      "venue",
-      "contact",
-      "game",
-      "video_note"
-    )
+    message("photo"),
+    message("video"),
+    message("document"),
+    message("audio"),
+    message("voice"),
+    message("video_note"),
+    message("animation"),
+    message("poll"),
+    message("sticker"),
+    message("location"),
+    message("venue"),
+    message("contact"),
+    message("game")
   ),
   async (ctx) => {
     if (ctx.state?.boosted) return;
