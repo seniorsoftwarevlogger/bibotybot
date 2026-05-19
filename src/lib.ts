@@ -82,7 +82,9 @@ export function deleteMediaMessage(ctx, { mute = true, warning }: { mute?: boole
         )
     )
     .then(() =>
-      mute ? blockUser(ctx.telegram, ctx.chat.id, ctx.message.from.id) : undefined
+      mute
+        ? muteFor24h(ctx.telegram, ctx.chat.id, ctx.message.from.id)
+        : undefined
     )
     .catch((e) => console.log("CANT DELETE:", ctx.message, e))
     .finally(() => console.log("DELETED", ctx.message.message_id));
