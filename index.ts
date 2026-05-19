@@ -10,9 +10,11 @@ import {
   blockUser,
   deleteMediaMessage,
   deleteMessage,
+  muteFor24h,
   restoreUserRights,
 } from "./src/lib.ts";
 import { classifyMessageOpenAI } from "./src/openaiClassifier.ts";
+import { getLevel, initPermissions, THRESHOLDS } from "./src/permissions.ts";
 
 // Setup =======================================================================
 
@@ -32,6 +34,9 @@ const {
 
 const mongo = new MongoClient(MONGODB_URI);
 await mongo.connect();
+
+// Read message counters from achivator bot's database (same cluster).
+initPermissions(mongo.db("achivator_bot"));
 
 // const storage = new natural.StorageBackend(natural.STORAGE_TYPES.MONGODB);
 
@@ -114,14 +119,18 @@ bot.use(async (ctx, next) => {
   const boosted = await boostedChannel(ctx);
   const family = FAMILY.includes(ctx.message?.from?.username);
   const id = ctx.message?.from?.id;
+  const chatId = ctx.chat?.id;
 
   console.log(`${id}: me ${isMe(ctx)}, boosted ${boosted}, family ${family}`);
 
   if (isMe(ctx) || family) return; // stop processing
 
-  // Store boosted status for later middleware
   ctx.state = ctx.state || {};
   ctx.state.boosted = boosted;
+
+  if (id && chatId && ctx.message) {
+    ctx.state.level = await getLevel(chatId, id);
+  }
 
   return next();
 });
@@ -209,8 +218,20 @@ bot.on(message("text"), async (ctx, next) => {
     }
   }
 
-  // Boosted users can post links
+  // Boosted users and users who earned enough messages can post links
   if (ctx.state?.boosted) return next();
+  if (ctx.state?.level?.canLink) return next();
+
+  const messageCount = ctx.state?.level?.messageCount ?? 0;
+  if (messageCount >= THRESHOLDS.react) {
+    // active member, just shy of the link threshold — soft delete, no mute
+    deleteMessage(
+      ctx,
+      `Ссылки доступны после ${THRESHOLDS.link} сообщений. У вас ${messageCount}.`,
+      { mute: false }
+    );
+    return;
+  }
 
   deleteMessage(
     ctx,
@@ -331,7 +352,6 @@ bot.action(/del:/, async (ctx) => {
 });
 
 const CLOWN_REACTION = "🤡";
-const ONE_DAY_IN_SECONDS = 24 * 60 * 60;
 
 function isClownReaction(reaction: { type: string; emoji?: string }) {
   return reaction.type === "emoji" && reaction.emoji === CLOWN_REACTION;
@@ -345,39 +365,42 @@ bot.on("message_reaction", async (ctx) => {
   if (upd.user?.username && FAMILY.includes(upd.user.username)) return;
 
   const chatId = upd.chat.id;
+  const oldReactions = upd.old_reaction || [];
+  const newReactions = upd.new_reaction || [];
 
-  const hadClownReaction = (upd.old_reaction || []).some(isClownReaction);
+  const hadClownReaction = oldReactions.some(isClownReaction);
   const addedClownReaction =
-    !hadClownReaction && (upd.new_reaction || []).some(isClownReaction);
+    !hadClownReaction && newReactions.some(isClownReaction);
 
   if (addedClownReaction) {
-    const untilDate = Math.floor(Date.now() / 1000) + ONE_DAY_IN_SECONDS;
     console.log(
       `Clown reaction trap: muting user ${userId} in chat ${chatId} for 24 hours`
     );
-    await ctx.telegram
-      .restrictChatMember(chatId, userId, {
-        until_date: untilDate,
-        permissions: {
-          can_send_messages: false,
-          can_send_audios: false,
-          can_send_documents: false,
-          can_send_photos: false,
-          can_send_videos: false,
-          can_send_video_notes: false,
-          can_send_voice_notes: false,
-          can_send_polls: false,
-          can_send_other_messages: false,
-          can_add_web_page_previews: false,
-        },
-      })
-      .catch((error) => {
-        console.error(
-          `Failed to mute user ${userId} for clown reaction trap:`,
-          error
-        );
-      });
+    await muteFor24h(ctx.telegram, chatId, userId).catch((error) => {
+      console.error(
+        `Failed to mute user ${userId} for clown reaction trap:`,
+        error
+      );
+    });
+    return;
   }
+
+  // Reactions are gated behind a small message threshold to keep bot reaction
+  // farms out. Anyone who hasn't earned the right and adds a reaction gets
+  // muted for 24h — same lever as the clown trap, since the Bot API can't
+  // remove someone else's reaction.
+  const reactionAdded = newReactions.length > oldReactions.length;
+  if (!reactionAdded) return;
+
+  const level = await getLevel(chatId, userId);
+  if (level.canReact) return;
+
+  console.log(
+    `Reaction gate: muting user ${userId} in chat ${chatId} for 24 hours (${level.messageCount}/${THRESHOLDS.react} messages)`
+  );
+  await muteFor24h(ctx.telegram, chatId, userId).catch((error) => {
+    console.error(`Failed to mute user ${userId} for early reaction:`, error);
+  });
 });
 
 // Replicate ban across all chats
@@ -436,9 +459,18 @@ bot.on(
     )
   ),
   async (ctx) => {
-    // Boosted users can post media
     if (ctx.state?.boosted) return;
-    
+    if (ctx.state?.level?.canMedia) return;
+
+    const messageCount = ctx.state?.level?.messageCount ?? 0;
+    if (messageCount >= THRESHOLDS.react) {
+      deleteMediaMessage(ctx, {
+        mute: false,
+        warning: `Медиа доступны после ${THRESHOLDS.media} сообщений. У вас ${messageCount}.`,
+      });
+      return;
+    }
+
     deleteMediaMessage(ctx);
     return;
   }
