@@ -10,9 +10,12 @@ import {
   blockUser,
   deleteMediaMessage,
   deleteMessage,
+  deleteUserReaction,
+  muteFor24h,
   restoreUserRights,
 } from "./src/lib.ts";
 import { classifyMessageOpenAI } from "./src/openaiClassifier.ts";
+import { getLevel, initPermissions, THRESHOLDS } from "./src/permissions.ts";
 
 // Setup =======================================================================
 
@@ -32,6 +35,9 @@ const {
 
 const mongo = new MongoClient(MONGODB_URI);
 await mongo.connect();
+
+// Read message counters from achivator bot's database (same cluster).
+initPermissions(mongo.db("achivator_bot"));
 
 // const storage = new natural.StorageBackend(natural.STORAGE_TYPES.MONGODB);
 
@@ -114,14 +120,18 @@ bot.use(async (ctx, next) => {
   const boosted = await boostedChannel(ctx);
   const family = FAMILY.includes(ctx.message?.from?.username);
   const id = ctx.message?.from?.id;
+  const chatId = ctx.chat?.id;
 
   console.log(`${id}: me ${isMe(ctx)}, boosted ${boosted}, family ${family}`);
 
   if (isMe(ctx) || family) return; // stop processing
 
-  // Store boosted status for later middleware
   ctx.state = ctx.state || {};
   ctx.state.boosted = boosted;
+
+  if (id && chatId && ctx.message) {
+    ctx.state.level = await getLevel(chatId, id);
+  }
 
   return next();
 });
@@ -209,8 +219,20 @@ bot.on(message("text"), async (ctx, next) => {
     }
   }
 
-  // Boosted users can post links
+  // Boosted users and users who earned enough messages can post links
   if (ctx.state?.boosted) return next();
+  if (ctx.state?.level?.canLink) return next();
+
+  const messageCount = ctx.state?.level?.messageCount ?? 0;
+  if (messageCount >= THRESHOLDS.react) {
+    // active member, just shy of the link threshold — soft delete, no mute
+    deleteMessage(
+      ctx,
+      `Ссылки доступны после ${THRESHOLDS.link} сообщений. У вас ${messageCount}.`,
+      { mute: false }
+    );
+    return;
+  }
 
   deleteMessage(
     ctx,
@@ -331,7 +353,16 @@ bot.action(/del:/, async (ctx) => {
 });
 
 const CLOWN_REACTION = "🤡";
-const ONE_DAY_IN_SECONDS = 24 * 60 * 60;
+
+// Repeat early-reaction within this window escalates from "just delete" to a mute.
+const REACTION_STRIKE_WINDOW_MS = 60 * 60 * 1000;
+const reactionStrikes = new Map<string, number>();
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, expiresAt] of reactionStrikes) {
+    if (expiresAt <= now) reactionStrikes.delete(key);
+  }
+}, 10 * 60 * 1000);
 
 function isClownReaction(reaction: { type: string; emoji?: string }) {
   return reaction.type === "emoji" && reaction.emoji === CLOWN_REACTION;
@@ -345,39 +376,68 @@ bot.on("message_reaction", async (ctx) => {
   if (upd.user?.username && FAMILY.includes(upd.user.username)) return;
 
   const chatId = upd.chat.id;
+  const oldReactions = upd.old_reaction || [];
+  const newReactions = upd.new_reaction || [];
 
-  const hadClownReaction = (upd.old_reaction || []).some(isClownReaction);
+  const hadClownReaction = oldReactions.some(isClownReaction);
   const addedClownReaction =
-    !hadClownReaction && (upd.new_reaction || []).some(isClownReaction);
+    !hadClownReaction && newReactions.some(isClownReaction);
 
   if (addedClownReaction) {
-    const untilDate = Math.floor(Date.now() / 1000) + ONE_DAY_IN_SECONDS;
     console.log(
       `Clown reaction trap: muting user ${userId} in chat ${chatId} for 24 hours`
     );
-    await ctx.telegram
-      .restrictChatMember(chatId, userId, {
-        until_date: untilDate,
-        permissions: {
-          can_send_messages: false,
-          can_send_audios: false,
-          can_send_documents: false,
-          can_send_photos: false,
-          can_send_videos: false,
-          can_send_video_notes: false,
-          can_send_voice_notes: false,
-          can_send_polls: false,
-          can_send_other_messages: false,
-          can_add_web_page_previews: false,
-        },
-      })
-      .catch((error) => {
-        console.error(
-          `Failed to mute user ${userId} for clown reaction trap:`,
-          error
-        );
-      });
+    await muteFor24h(ctx.telegram, chatId, userId).catch((error) => {
+      console.error(
+        `Failed to mute user ${userId} for clown reaction trap:`,
+        error
+      );
+    });
+    return;
   }
+
+  // Reactions are gated behind a small message threshold to keep bot reaction
+  // farms out. First strike: silently remove the reaction. Repeat within the
+  // strike window: 24h mute on top.
+  const reactionAdded = newReactions.length > oldReactions.length;
+  if (!reactionAdded) return;
+
+  const level = await getLevel(chatId, userId);
+  if (level.canReact) return;
+
+  const messageId = upd.message_id;
+  await deleteUserReaction(ctx.telegram, chatId, messageId, userId).catch(
+    (error) => {
+      console.error(
+        `Failed to delete reaction by user ${userId} on message ${messageId}:`,
+        error
+      );
+    }
+  );
+
+  const strikeKey = `${chatId}:${userId}`;
+  const now = Date.now();
+  const previousStrike = reactionStrikes.get(strikeKey);
+  const isRepeat = previousStrike !== undefined && previousStrike > now;
+
+  if (isRepeat) {
+    console.log(
+      `Reaction gate: muting repeat offender ${userId} in chat ${chatId} (${level.messageCount}/${THRESHOLDS.react} messages)`
+    );
+    reactionStrikes.delete(strikeKey);
+    await muteFor24h(ctx.telegram, chatId, userId).catch((error) => {
+      console.error(
+        `Failed to mute user ${userId} for repeat early reaction:`,
+        error
+      );
+    });
+    return;
+  }
+
+  reactionStrikes.set(strikeKey, now + REACTION_STRIKE_WINDOW_MS);
+  console.log(
+    `Reaction gate: removed reaction by ${userId} in chat ${chatId} (${level.messageCount}/${THRESHOLDS.react} messages, first strike)`
+  );
 });
 
 // Replicate ban across all chats
@@ -436,9 +496,18 @@ bot.on(
     )
   ),
   async (ctx) => {
-    // Boosted users can post media
     if (ctx.state?.boosted) return;
-    
+    if (ctx.state?.level?.canMedia) return;
+
+    const messageCount = ctx.state?.level?.messageCount ?? 0;
+    if (messageCount >= THRESHOLDS.react) {
+      deleteMediaMessage(ctx, {
+        mute: false,
+        warning: `Медиа доступны после ${THRESHOLDS.media} сообщений. У вас ${messageCount}.`,
+      });
+      return;
+    }
+
     deleteMediaMessage(ctx);
     return;
   }
