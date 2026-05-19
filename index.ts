@@ -122,15 +122,24 @@ bot.use(async (ctx, next) => {
   const id = ctx.message?.from?.id;
   const chatId = ctx.chat?.id;
 
-  console.log(`${id}: me ${isMe(ctx)}, boosted ${boosted}, family ${family}`);
+  const level =
+    id && chatId && ctx.message ? await getLevel(chatId, id) : null;
+
+  console.log(
+    `${id}: me ${isMe(ctx)}, boosted ${boosted}, family ${family}, messages ${
+      level?.messageCount ?? "n/a"
+    }, react ${level?.canReact ?? "n/a"}, link ${
+      level?.canLink ?? "n/a"
+    }, media ${level?.canMedia ?? "n/a"}`
+  );
 
   if (isMe(ctx) || family) return; // stop processing
 
   ctx.state = ctx.state || {};
   ctx.state.boosted = boosted;
 
-  if (id && chatId && ctx.message) {
-    ctx.state.level = await getLevel(chatId, id);
+  if (level) {
+    ctx.state.level = level;
   }
 
   return next();
