@@ -231,24 +231,16 @@ bot.command("blocklinks", async (ctx) => {
 async function replyWithStat(ctx) {
   const replyTarget = ctx.message.reply_to_message?.from;
   if (replyTarget && isTelegramServiceUser(replyTarget)) {
-    await ctx.reply(
-      "В комментариях к посту Telegram не передает боту пользователя, для которого нужно показать статистику. Напишите /stat в чате или ответьте командой на сообщение пользователя в чате.",
-      {
-        reply_parameters: {
-          message_id: ctx.message.message_id,
-        },
-      }
+    await replyAndDeleteStat(
+      ctx,
+      "В комментариях к посту Telegram не передает боту пользователя, для которого нужно показать статистику. Напишите /stat в чате или ответьте командой на сообщение пользователя в чате."
     );
     return;
   }
 
   const target = replyTarget ?? ctx.from;
   if (!target) {
-    await ctx.reply("Не могу определить пользователя.", {
-      reply_parameters: {
-        message_id: ctx.message.message_id,
-      },
-    });
+    await replyAndDeleteStat(ctx, "Не могу определить пользователя.");
     return;
   }
 
@@ -257,7 +249,8 @@ async function replyWithStat(ctx) {
   const family = Boolean(target.username && FAMILY.includes(target.username));
   const name = target.username ? `@${target.username}` : target.first_name;
 
-  await ctx.reply(
+  await replyAndDeleteStat(
+    ctx,
     [
       `Статистика ${name}:`,
       `Сообщений: ${level.messageCount}`,
@@ -266,13 +259,22 @@ async function replyWithStat(ctx) {
       `Медиа: ${level.canMedia ? "можно" : `нужно ${THRESHOLDS.media}`}`,
       `Буст: ${boosted ? "есть" : "нет"}`,
       `Family: ${family ? "да" : "нет"}`,
-    ].join("\n"),
-    {
-      reply_parameters: {
-        message_id: ctx.message.message_id,
-      },
-    }
+    ].join("\n")
   );
+}
+
+async function replyAndDeleteStat(ctx, text) {
+  const botReply = await ctx.reply(text, {
+    reply_parameters: {
+      message_id: ctx.message.message_id,
+    },
+  });
+
+  setTimeout(() => {
+    ctx.deleteMessage(botReply.message_id).catch((error) => {
+      console.log("CANT DELETE STAT REPLY:", botReply, error);
+    });
+  }, 15000);
 }
 
 bot.command("stat", replyWithStat);
