@@ -120,14 +120,6 @@ function boostCacheKey(channelId, userId) {
   return `${channelId}:${userId}`;
 }
 
-// Store allowed threads for links (in memory cache)
-const allowedThreads = new Set<string>();
-
-// Load allowed threads from database on startup
-const allowedThreadsCollection = mongo.db("family").collection("allowed_threads");
-const loadedThreads = await allowedThreadsCollection.find({}).toArray();
-loadedThreads.forEach((thread) => allowedThreads.add(thread.threadId));
-
 bot.use(async (ctx, next) => {
   const boosted = await boostedChannel(ctx);
   const family = FAMILY.includes(ctx.message?.from?.username);
@@ -173,59 +165,6 @@ bot.use(async (ctx, next) => {
   if (isOwnChannelExternalReply(ctx)) return next();
 
   deleteMessage(ctx, "Сообщение с внешней ссылкой удалено.");
-});
-
-// Command handler for allowing links in a thread
-bot.command("allowlinks", async (ctx) => {
-  // Check if the message is a reply (in a thread)
-  const threadId = ctx.message.reply_to_message?.message_id;
-  if (!threadId) {
-    await ctx.reply("Эта команда должна быть отправлена в ответ на сообщение в треде.");
-    return;
-  }
-
-  // Check if user is admin
-  const member = await ctx.telegram.getChatMember(ctx.chat.id, ctx.from.id);
-  if (member.status !== "administrator" && member.status !== "creator") {
-    await ctx.reply("Только администраторы могут использовать эту команду.");
-    return;
-  }
-
-  const threadKey = `${ctx.chat.id}:${threadId}`;
-  allowedThreads.add(threadKey);
-
-  // Save to database
-  await allowedThreadsCollection.updateOne(
-    { threadId: threadKey },
-    { $set: { threadId: threadKey, chatId: ctx.chat.id, messageId: threadId } },
-    { upsert: true }
-  );
-
-  await ctx.reply("Ссылки разрешены в этом треде.");
-});
-
-bot.command("blocklinks", async (ctx) => {
-  // Check if the message is a reply (in a thread)
-  const threadId = ctx.message.reply_to_message?.message_id;
-  if (!threadId) {
-    await ctx.reply("Эта команда должна быть отправлена в ответ на сообщение в треде.");
-    return;
-  }
-
-  // Check if user is admin
-  const member = await ctx.telegram.getChatMember(ctx.chat.id, ctx.from.id);
-  if (member.status !== "administrator" && member.status !== "creator") {
-    await ctx.reply("Только администраторы могут использовать эту команду.");
-    return;
-  }
-
-  const threadKey = `${ctx.chat.id}:${threadId}`;
-  allowedThreads.delete(threadKey);
-
-  // Remove from database
-  await allowedThreadsCollection.deleteOne({ threadId: threadKey });
-
-  await ctx.reply("Ссылки заблокированы в этом треде.");
 });
 
 async function replyWithStat(ctx) {
@@ -283,15 +222,6 @@ bot.hears(/^@bibotybot\/stat(?:\s|$)/i, replyWithStat);
 bot.on(message("text"), async (ctx, next) => {
   console.debug("hasLinks", hasLinks(ctx));
   if (!hasLinks(ctx)) return next();
-
-  // Check if links are allowed in this thread
-  const threadId = ctx.message.reply_to_message?.message_id;
-  if (threadId) {
-    const threadKey = `${ctx.chat.id}:${threadId}`;
-    if (allowedThreads.has(threadKey)) {
-      return next();
-    }
-  }
 
   // Boosted users and users who earned enough messages can post links
   if (ctx.state?.boosted) return next();
@@ -590,11 +520,7 @@ const launchOptions =
     : { polling: { timeout: 30, limit: 10 } };
 
 await bot.telegram
-  .setMyCommands([
-    { command: "allowlinks", description: "allow links" },
-    { command: "blocklinks", description: "block links" },
-    { command: "stat", description: "show user stats" },
-  ])
+  .setMyCommands([{ command: "stat", description: "show user stats" }])
   .catch((error) => console.error("Failed to set bot commands:", error));
 
 bot.launch(
