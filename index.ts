@@ -229,9 +229,26 @@ bot.command("blocklinks", async (ctx) => {
 });
 
 async function replyWithStat(ctx) {
-  const target = ctx.message.reply_to_message?.from ?? ctx.from;
+  const replyTarget = ctx.message.reply_to_message?.from;
+  if (replyTarget && isTelegramServiceUser(replyTarget)) {
+    await ctx.reply(
+      "В комментариях к посту Telegram не передает боту пользователя, для которого нужно показать статистику. Напишите /stat в чате или ответьте командой на сообщение пользователя в чате.",
+      {
+        reply_parameters: {
+          message_id: ctx.message.message_id,
+        },
+      }
+    );
+    return;
+  }
+
+  const target = replyTarget ?? ctx.from;
   if (!target) {
-    await ctx.reply("Не могу определить пользователя.");
+    await ctx.reply("Не могу определить пользователя.", {
+      reply_parameters: {
+        message_id: ctx.message.message_id,
+      },
+    });
     return;
   }
 
@@ -249,7 +266,12 @@ async function replyWithStat(ctx) {
       `Медиа: ${level.canMedia ? "можно" : `нужно ${THRESHOLDS.media}`}`,
       `Буст: ${boosted ? "есть" : "нет"}`,
       `Family: ${family ? "да" : "нет"}`,
-    ].join("\n")
+    ].join("\n"),
+    {
+      reply_parameters: {
+        message_id: ctx.message.message_id,
+      },
+    }
   );
 }
 
@@ -595,11 +617,16 @@ function isMe({ message }) {
   if (!message || !message.from) return false;
 
   return (
-    message.from.first_name === "Telegram" ||
+    isTelegramServiceUser(message.from) ||
     (message.from.first_name === "Channel" &&
       myChannels.includes(message.sender_chat?.username))
   );
 }
+
+function isTelegramServiceUser(user) {
+  return user.first_name === "Telegram";
+}
+
 function isChannelBot({ message }) {
   if (!message || !message.from) return false;
   return message.from.first_name === "Channel";
