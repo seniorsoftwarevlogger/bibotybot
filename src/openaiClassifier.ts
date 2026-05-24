@@ -3,7 +3,11 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-export const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+let _openai: OpenAI | null = null;
+function defaultClient(): OpenAI {
+  if (!_openai) _openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+  return _openai;
+}
 
 const spamExamples = [
   "Ищy людeй желaющих хорoшо зaрабатывaть в удалeнном фopмате. Зa подрoбностями пишитe в личныe соoбщeния.",
@@ -42,7 +46,7 @@ UPD:
 
 export async function classifyMessageOpenAI(
   message: string,
-  client: OpenAI = openai
+  client: OpenAI = defaultClient()
 ): Promise<boolean> {
   const prompt = `
 Определи, является ли следующее сообщение эротическим спамом, вовлечением в сомнительные предложения о сотрудничестве, реклама крипто монет, покупки USDT или предложение о работе. Так же учитывай, что сообщения могут быть на других языках. Учитывай следующие примеры спам-сообщений:
