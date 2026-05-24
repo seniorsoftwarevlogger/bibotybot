@@ -3,7 +3,7 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+export const openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
 
 const spamExamples = [
   "Ищy людeй желaющих хорoшо зaрабатывaть в удалeнном фopмате. Зa подрoбностями пишитe в личныe соoбщeния.",
@@ -40,7 +40,10 @@ UPD:
 늦으면 내일 ㄱㄱ 해야댐 ㅋㅋ`
 ];
 
-export async function classifyMessageOpenAI(message: string): Promise<boolean> {
+export async function classifyMessageOpenAI(
+  message: string,
+  client: OpenAI = openai
+): Promise<boolean> {
   const prompt = `
 Определи, является ли следующее сообщение эротическим спамом, вовлечением в сомнительные предложения о сотрудничестве, реклама крипто монет, покупки USDT или предложение о работе. Так же учитывай, что сообщения могут быть на других языках. Учитывай следующие примеры спам-сообщений:
 
@@ -53,7 +56,7 @@ ${spamExamples.map((example) => `- ${example}`).join("\n")}
 `;
 
   try {
-    const response = await openai.chat.completions.create({
+    const response = await client.chat.completions.create({
       model: "gpt-4o-mini",
       messages: [
         {
