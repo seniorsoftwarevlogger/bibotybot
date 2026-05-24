@@ -6,6 +6,22 @@ export const THRESHOLDS = {
   media: 50,
 } as const;
 
+export const RANKS = [
+  { count: 500, tag: "TB" },
+  { count: 100, tag: "GB" },
+  { count: 50, tag: "MB" },
+  { count: 10, tag: "kB" },
+] as const;
+
+export type Rank = (typeof RANKS)[number]["tag"] | null;
+
+export function getRank(messageCount: number): Rank {
+  for (const rank of RANKS) {
+    if (messageCount >= rank.count) return rank.tag;
+  }
+  return null;
+}
+
 const CACHE_TTL_MS = 60_000;
 
 export type Level = {
