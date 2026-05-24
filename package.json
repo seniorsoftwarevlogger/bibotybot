@@ -7,7 +7,10 @@
   "scripts": {
     "start": "node --experimental-strip-types index.ts",
     "train": "node --experimental-strip-types src/trainClassifier.ts",
-    "classify": "node --experimental-strip-types src/classifyMessage.ts"
+    "classify": "node --experimental-strip-types src/classifyMessage.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "engines": {
     "node": "22.6"
@@ -25,6 +28,8 @@
   },
   "devDependencies": {
     "@types/node": "^22.4.0",
-    "ts-node": "^10.9.1"
+    "@vitest/coverage-v8": "^4.1.7",
+    "ts-node": "^10.9.1",
+    "vitest": "^4.1.7"
   }
 }
