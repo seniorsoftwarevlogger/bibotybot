@@ -15,7 +15,13 @@ import {
   restoreUserRights,
 } from "./src/lib.ts";
 import { classifyMessageOpenAI } from "./src/openaiClassifier.ts";
-import { getLevel, initPermissions, THRESHOLDS } from "./src/permissions.ts";
+import {
+  getLevel,
+  getRank,
+  initPermissions,
+  Rank,
+  THRESHOLDS,
+} from "./src/permissions.ts";
 
 // Setup =======================================================================
 
@@ -105,6 +111,7 @@ setInterval(async () => {
 }, 1000 * 60 * 60);
 
 const boostsCache = new Map();
+const assignedRanks = new Map<string, Rank>();
 
 const goodCitizens = bloom.BloomFilter.create(1000000, 0.01);
 
@@ -144,6 +151,17 @@ bot.use(async (ctx, next) => {
 
   if (level) {
     ctx.state.level = level;
+
+    const rank = getRank(level.messageCount);
+    const rankKey = `${chatId}:${id}`;
+    if (rank !== null && assignedRanks.get(rankKey) !== rank) {
+      assignedRanks.set(rankKey, rank);
+      (ctx.telegram as any)
+        .callApi("setChatMemberTag", { chat_id: chatId, user_id: id, tag: rank })
+        .catch((error: unknown) => {
+          console.error(`Failed to set rank tag "${rank}" for user ${id} in chat ${chatId}:`, error);
+        });
+    }
   }
 
   return next();
@@ -187,12 +205,14 @@ async function replyWithStat(ctx) {
   const boosted = await boostedUser(ctx.telegram, ctx.message, target.id);
   const family = Boolean(target.username && FAMILY.includes(target.username));
   const name = target.username ? `@${target.username}` : target.first_name;
+  const rank = getRank(level.messageCount);
 
   await replyAndDeleteStat(
     ctx,
     [
       `Статистика ${name}:`,
       `Сообщений: ${level.messageCount}`,
+      `Ранг: ${rank ?? "—"}`,
       `Реакции: ${level.canReact ? "можно" : `нужно ${THRESHOLDS.react}`}`,
       `Ссылки: ${level.canLink ? "можно" : `нужно ${THRESHOLDS.link}`}`,
       `Медиа: ${level.canMedia ? "можно" : `нужно ${THRESHOLDS.media}`}`,
