@@ -22,6 +22,15 @@ import {
   Rank,
   THRESHOLDS,
 } from "./src/permissions.ts";
+import {
+  boostCacheKey,
+  hasLinks,
+  isChannelBot,
+  isMe,
+  isOwnChannelExternalReply,
+  isStatCommand,
+  isTelegramServiceUser,
+} from "./src/helpers.ts";
 
 // Setup =======================================================================
 
@@ -115,17 +124,6 @@ const assignedRanks = new Map<string, Rank>();
 
 const goodCitizens = bloom.BloomFilter.create(1000000, 0.01);
 
-function isStatCommand(ctx) {
-  const text = ctx.message?.text ?? "";
-  return (
-    /^\/stat(?:@\w+)?(?:\s|$)/.test(text) ||
-    /^@bibotybot\/stat(?:\s|$)/i.test(text)
-  );
-}
-
-function boostCacheKey(channelId, userId) {
-  return `${channelId}:${userId}`;
-}
 
 bot.use(async (ctx, next) => {
   const boosted = await boostedChannel(ctx);
@@ -137,14 +135,14 @@ bot.use(async (ctx, next) => {
     id && chatId && ctx.message ? await getLevel(chatId, id) : null;
 
   console.log(
-    `${id}: me ${isMe(ctx)}, boosted ${boosted}, family ${family}, messages ${
+    `${id}: me ${isMe(ctx, myChannels)}, boosted ${boosted}, family ${family}, messages ${
       level?.messageCount ?? "n/a"
     }, react ${level?.canReact ?? "n/a"}, link ${
       level?.canLink ?? "n/a"
     }, media ${level?.canMedia ?? "n/a"}`
   );
 
-  if ((isMe(ctx) || family) && !isStatCommand(ctx)) return; // stop processing
+  if ((isMe(ctx, myChannels) || family) && !isStatCommand(ctx)) return; // stop processing
 
   ctx.state = ctx.state || {};
   ctx.state.boosted = boosted;
@@ -180,7 +178,7 @@ bot.use(async (ctx, next) => {
 });
 bot.use(async (ctx, next) => {
   if (!ctx.message || !("external_reply" in ctx.message)) return next();
-  if (isOwnChannelExternalReply(ctx)) return next();
+  if (isOwnChannelExternalReply(ctx, myChannels)) return next();
 
   deleteMessage(ctx, "Сообщение с внешней ссылкой удалено.");
 });
@@ -561,52 +559,6 @@ bot.launch(
 process.once("SIGINT", () => bot.stop("SIGINT"));
 process.once("SIGTERM", () => bot.stop("SIGTERM"));
 
-function isMe({ message }) {
-  if (!message || !message.from) return false;
-
-  return (
-    isTelegramServiceUser(message.from) ||
-    (message.from.first_name === "Channel" &&
-      myChannels.includes(message.sender_chat?.username))
-  );
-}
-
-function isTelegramServiceUser(user) {
-  return user.first_name === "Telegram";
-}
-
-function isChannelBot({ message }) {
-  if (!message || !message.from) return false;
-  return message.from.first_name === "Channel";
-}
-function hasLinks(ctx) {
-  if (!ctx.message) return false;
-  return ctx.message.entities?.some(
-    (entity) => entity.type === "url" || entity.type === "text_link"
-  );
-}
-function isOwnChannelExternalReply(ctx) {
-  const externalReply = ctx.message?.external_reply;
-  const originChat =
-    externalReply?.origin && "chat" in externalReply.origin
-      ? externalReply.origin.chat
-      : null;
-  const replyChat = externalReply?.chat;
-
-  if (!originChat?.id || !replyChat?.id || originChat.id !== replyChat.id) {
-    return false;
-  }
-
-  const replyToMessage = ctx.message?.reply_to_message;
-  if (replyToMessage?.chat?.id !== ctx.message?.chat.id) return false;
-
-  const repliedChannelId = replyToMessage?.sender_chat?.id;
-  if (repliedChannelId !== replyChat.id) return false;
-
-  return [originChat.username, replyChat.username].some(
-    (username) => username && myChannels.includes(username)
-  );
-}
 async function boostedChannel(ctx) {
   if (!ctx.hasOwnProperty("message")) return false;
 
