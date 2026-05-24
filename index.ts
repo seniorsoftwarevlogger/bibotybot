@@ -19,7 +19,7 @@ import {
   getLevel,
   getRank,
   initPermissions,
-  Rank,
+  type Rank,
   THRESHOLDS,
 } from "./src/permissions.ts";
 import {
