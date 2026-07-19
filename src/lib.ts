@@ -62,24 +62,46 @@ export function restoreUserRights(telegram, chatId, userId) {
   });
 }
 
+// Ephemeral messages (Bot API 10.2): a group/supergroup message that is visible
+// only to the single member named by `receiver_user_id` — nobody else in the chat
+// sees it. We use them to privately tell a user why their message was removed,
+// instead of announcing the deletion to everyone with a public (then auto-deleted)
+// warning. Telegraf 4.16.3 has no typed support for `receiver_user_id` yet, but it
+// forwards unknown fields from the extra options object straight to the Bot API,
+// so we pass it through there. Delivery is best-effort — Telegram may skip it when
+// the recipient is offline — so callers treat a rejection as non-fatal.
+export function sendEphemeralMessage(
+  telegram,
+  chatId,
+  userId,
+  text,
+  extra: Record<string, unknown> = {}
+) {
+  return telegram.sendMessage(chatId, text, {
+    receiver_user_id: userId,
+    link_preview_options: { is_disabled: true },
+    ...extra,
+  });
+}
+
 export function deleteMediaMessage(ctx, { mute = true, warning }: { mute?: boolean; warning?: string } = {}) {
   const warningText =
     warning ??
     `Медиа за буст канала https://t.me/boost/seniorsoftwarevlogger или за доллар https://boosty.to/seniorsoftwarevlogger`;
 
+  const userId = ctx.message.from?.id;
+
   return ctx
     .deleteMessage(ctx.message.message_id)
     .then(() =>
-      ctx.telegram
-        .sendMessage(ctx.chat.id, warningText, {
-          link_preview_options: { is_disabled: true },
-          reply_parameters: {
-            message_id: getReplyToChannelId(ctx.message.reply_to_message),
-          },
-        })
-        .then((botReply) =>
-          setTimeout(() => ctx.deleteMessage(botReply.message_id), 10000)
-        )
+      userId
+        ? sendEphemeralMessage(
+            ctx.telegram,
+            ctx.chat.id,
+            userId,
+            warningText
+          ).catch((e) => console.log("CANT SEND EPHEMERAL:", userId, e))
+        : undefined
     )
     .then(() =>
       mute
@@ -90,22 +112,25 @@ export function deleteMediaMessage(ctx, { mute = true, warning }: { mute?: boole
     .finally(() => console.log("DELETED", ctx.message.message_id));
 }
 export function deleteMessage(ctx, warningMessage, { mute = true }: { mute?: boolean } = {}) {
-  // ctx.telegram
-  //   .sendMessage(ctx.chat.id, warningMessage, {
-  //     link_preview_options: { is_disabled: true },
-  //     message_id: getReplyToChannelId(ctx.message.reply_to_message),
-  //   })
-  //   .then((botReply) => {
-  //     setTimeout(() => ctx.deleteMessage(botReply.message_id), 60000);
-  //   });
+  const userId = ctx.message.from?.id;
 
   return ctx.telegram
     .copyMessage(`@ssv_purge`, ctx.chat.id, ctx.message.message_id, {
       disable_notification: true,
     })
-    .then((res) =>
+    .then(() =>
       ctx
         .deleteMessage(ctx.message.message_id)
+        .then(() =>
+          warningMessage && userId
+            ? sendEphemeralMessage(
+                ctx.telegram,
+                ctx.chat.id,
+                userId,
+                warningMessage
+              ).catch((e) => console.log("CANT SEND EPHEMERAL:", userId, e))
+            : undefined
+        )
         .then(() =>
           mute ? blockUser(ctx.telegram, ctx.chat.id, ctx.message.from.id) : undefined
         )

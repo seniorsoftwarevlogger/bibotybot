@@ -187,6 +187,12 @@ describe("spam filter", () => {
     const copy = capturedCalls.find((c) => c.method === "copyMessage");
     expect(copy?.body.from_chat_id).toBe(CHAT_ID);
     expect(copy?.body.message_id).toBe(MSG_ID);
+
+    // The "why it was removed" notice goes out as an ephemeral message that only
+    // the offending user can see, addressed via receiver_user_id.
+    const notice = capturedCalls.find((c) => c.method === "sendMessage");
+    expect(notice?.body.receiver_user_id).toBe(userId);
+    expect(notice?.body.text).toBe("Spam removed.");
   });
 
   it("lets a normal message pass without any restriction", async () => {
@@ -213,6 +219,10 @@ describe("link filter", () => {
 
     expect(calledMethods()).toContain("copyMessage");
     expect(calledMethods()).toContain("deleteMessage");
+
+    const notice = capturedCalls.find((c) => c.method === "sendMessage");
+    expect(notice?.body.receiver_user_id).toBe(userId);
+    expect(notice?.body.text).toBe("No links for you.");
   });
 
   it("allows a link message from a user who reached the link threshold", async () => {
@@ -250,6 +260,11 @@ describe("media filter", () => {
     expect(calledMethods()).toContain("deleteMessage");
     expect(calledMethods()).toContain("sendMessage");
     expect(calledMethods()).toContain("restrictChatMember");
+
+    // The removal notice is ephemeral: only the user who posted the media sees it,
+    // so the group is not spammed with a public warning.
+    const notice = capturedCalls.find((c) => c.method === "sendMessage");
+    expect(notice?.body.receiver_user_id).toBe(userId);
   });
 
   it("allows a photo from a user who reached the media threshold", async () => {
