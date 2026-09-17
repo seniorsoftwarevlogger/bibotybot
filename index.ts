@@ -55,8 +55,9 @@ await mongo.connect();
 // Read message counters from achivator bot's database (same cluster).
 initPermissions(mongo.db("achivator_bot"));
 
-// Store Jev shadow-mode comparisons for offline evaluation.
-initSpamShadow(mongo.db("bibotybot"));
+// Store Jev shadow-mode comparisons for offline evaluation. Defaults to the
+// database from MONGODB_URI, the only one this user is allowed to write to.
+initSpamShadow(mongo.db(process.env.JEV_SHADOW_DB));
 
 // const storage = new natural.StorageBackend(natural.STORAGE_TYPES.MONGODB);
 
