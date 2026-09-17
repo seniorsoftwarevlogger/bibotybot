@@ -9,6 +9,7 @@
     "train": "node src/trainClassifier.ts",
     "classify": "node src/classifyMessage.ts",
     "jev": "node src/classifyMessageJev.ts",
+    "jev:eval": "node src/evalJev.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
