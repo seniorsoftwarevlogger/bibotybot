@@ -27,6 +27,23 @@ export function initSpamShadow(db: Db) {
   shadowLog = db.collection<ShadowDoc>("jev_shadow");
 }
 
+// Writing is best effort: the Mongo user may not be allowed to write to this
+// database. Log the first failure and stop trying, so stdout keeps the
+// comparison without an error per message.
+function persist(doc: ShadowDoc): void {
+  if (!shadowLog) return;
+
+  shadowLog.insertOne(doc).catch((error) => {
+    shadowLog = null;
+    console.error(
+      JSON.stringify({
+        event: "jev_shadow_store_disabled",
+        message: error instanceof Error ? error.message : String(error),
+      })
+    );
+  });
+}
+
 export type ShadowInput = {
   text: string;
   chatId: number;
@@ -43,7 +60,7 @@ export function logSpamShadow(input: ShadowInput): void {
   if (!isJevConfigured()) return;
 
   classifyMessageJev(input.text)
-    .then(async (verdict) => {
+    .then((verdict) => {
       const agree = verdict.spam === input.production;
 
       console.log(
@@ -65,8 +82,7 @@ export function logSpamShadow(input: ShadowInput): void {
         })
       );
 
-      if (!shadowLog) return;
-      await shadowLog.insertOne({
+      persist({
         createdAt: new Date(),
         chatId: input.chatId,
         userId: input.userId,
