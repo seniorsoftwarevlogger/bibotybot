@@ -8,6 +8,7 @@
     "start": "node index.ts",
     "train": "node src/trainClassifier.ts",
     "classify": "node src/classifyMessage.ts",
+    "jev": "node src/classifyMessageJev.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
@@ -19,6 +20,7 @@
   "license": "MIT",
   "dependencies": {
     "@sentry/node": "^5.19.0",
+    "@typesafe-ai/sdk": "^0.6.0",
     "bloom-filters": "^3.0.2",
     "dotenv": "^8.2.0",
     "mongodb": "^6.8.0",

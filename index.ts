@@ -15,6 +15,7 @@ import {
   restoreUserRights,
 } from "./src/lib.ts";
 import { classifyMessageOpenAI } from "./src/openaiClassifier.ts";
+import { initSpamShadow, logSpamShadow } from "./src/spamShadow.ts";
 import {
   getLevel,
   getRank,
@@ -53,6 +54,9 @@ await mongo.connect();
 
 // Read message counters from achivator bot's database (same cluster).
 initPermissions(mongo.db("achivator_bot"));
+
+// Store Jev shadow-mode comparisons for offline evaluation.
+initSpamShadow(mongo.db("bibotybot"));
 
 // const storage = new natural.StorageBackend(natural.STORAGE_TYPES.MONGODB);
 
@@ -293,6 +297,16 @@ bot.on(message("text"), async (ctx, next) => {
   }
 
   const spam = await isSpam(ctx.message.text);
+
+  // Shadow mode: ask Jev the same question, log only, decision stays with OpenAI.
+  logSpamShadow({
+    text: ctx.message.text,
+    chatId: ctx.chat.id,
+    userId: ctx.message.from.id,
+    messageId: ctx.message.message_id,
+    production: spam,
+  });
+
   if (!spam) {
     goodCitizens.add(ctx.message.from.id.toString());
 

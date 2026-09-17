@@ -26,6 +26,27 @@ BOT_TOKEN=
 SENTRY_DSN=
 ```
 
+### Spam classifier (Jev shadow mode)
+
+The production spam decision is still made by the OpenAI classifier
+(`src/openaiClassifier.ts`). In parallel every checked message is also sent to
+TypeSafe's Jev model (`src/jevClassifier.ts`); the verdicts are only compared
+and logged — as a `jev_shadow` JSON line in stdout and as a document in the
+`bibotybot.jev_shadow` collection.
+
+```
+TYPESAFE_API_KEY=       # without it shadow mode is silently disabled
+JEV_MODEL=jev-latest
+JEV_SPAM_THRESHOLD=0.5  # noul >= threshold means spam
+JEV_TIMEOUT_MS=5000
+```
+
+Check a single message manually:
+
+```
+npm run jev -- "текст сообщения"
+```
+
 ## Features
 
 1. **Ban Replication**: The bot now supports replicating ban events across all managed channels upon receiving a ban command from an admin.
