@@ -5,13 +5,16 @@
   "main": "index.ts",
   "type": "module",
   "scripts": {
-    "start": "node --experimental-strip-types index.ts",
-    "train": "node --experimental-strip-types src/trainClassifier.ts",
-    "classify": "node --experimental-strip-types src/classifyMessage.ts",
-    "jev": "node --experimental-strip-types src/classifyMessageJev.ts"
+    "start": "node index.ts",
+    "train": "node src/trainClassifier.ts",
+    "classify": "node src/classifyMessage.ts",
+    "jev": "node src/classifyMessageJev.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
   },
   "engines": {
-    "node": "22.6"
+    "node": ">=22.18.0"
   },
   "author": "",
   "license": "MIT",
@@ -27,6 +30,9 @@
   },
   "devDependencies": {
     "@types/node": "^22.4.0",
-    "ts-node": "^10.9.1"
+    "@vitest/coverage-v8": "^4.1.7",
+    "msw": "^2.14.6",
+    "ts-node": "^10.9.1",
+    "vitest": "^4.1.7"
   }
 }

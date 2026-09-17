@@ -1,4 +1,4 @@
-FROM node:22.6-alpine3.19
+FROM node:22.23.1-alpine3.24
 
 RUN mkdir -p /home/node/app/node_modules && chown -R node:node /home/node/app
 
@@ -14,4 +14,4 @@ COPY --chown=node:node . .
 
 EXPOSE 5000
 
-CMD ["node", "--experimental-strip-types", "./index.ts"]
+CMD ["node", "./index.ts"]

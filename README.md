@@ -53,6 +53,10 @@ npm run jev -- "текст сообщения"
 
 2. **Thread-specific Link Control**: Admins can allow or block links in specific threads.
 
+3. **Ephemeral removal notices**: When the bot removes a user's message (spam, links, media, etc.), it tells that user *why* using a Telegram [ephemeral message](https://core.telegram.org/bots/features#ephemeral-messages) — a group message addressed to a single member via `receiver_user_id` that only they can see. This keeps the chat clean (no public "message deleted" warnings) while still notifying the offender privately. Requires a Bot API server that supports ephemeral messages (Bot API 10.2+); delivery is best-effort and failures are logged, not fatal.
+
+   > Note: the Telegram Bot API does not deliver an update when a regular user deletes their *own* message in a group, so the notice is tied to the bot's own removals rather than user self-deletions.
+
 ### Ban Replication Feature
 
 This new feature allows admins to issue a ban command that will be replicated across all channels managed by the bot. The ban propagates through the channels automatically.
