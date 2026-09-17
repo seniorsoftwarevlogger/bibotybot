@@ -39,7 +39,7 @@ logging to stdout only.
 ```
 TYPESAFE_API_KEY=       # without it shadow mode is silently disabled
 JEV_MODEL=jev-latest
-JEV_SPAM_THRESHOLD=0.5  # noul >= threshold means spam
+JEV_SPAM_THRESHOLD=0.35 # noul >= threshold means spam
 JEV_TIMEOUT_MS=5000
 JEV_SHADOW_DB=          # database for the jev_shadow collection, defaults to the one in MONGODB_URI
 ```
@@ -48,6 +48,13 @@ Check a single message manually:
 
 ```
 npm run jev -- "текст сообщения"
+```
+
+Measure the prompt against the labelled set in `src/evalJev.ts` after changing
+it (costs API calls, so it is not part of `npm test`):
+
+```
+npm run jev:eval
 ```
 
 ## Features
