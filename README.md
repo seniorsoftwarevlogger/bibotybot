@@ -32,13 +32,16 @@ The production spam decision is still made by the OpenAI classifier
 (`src/openaiClassifier.ts`). In parallel every checked message is also sent to
 TypeSafe's Jev model (`src/jevClassifier.ts`); the verdicts are only compared
 and logged — as a `jev_shadow` JSON line in stdout and as a document in the
-`bibotybot.jev_shadow` collection.
+`jev_shadow` collection. Storing is best effort: if the Mongo user cannot write
+to the database, the bot logs `jev_shadow_store_disabled` once and keeps
+logging to stdout only.
 
 ```
 TYPESAFE_API_KEY=       # without it shadow mode is silently disabled
 JEV_MODEL=jev-latest
 JEV_SPAM_THRESHOLD=0.5  # noul >= threshold means spam
 JEV_TIMEOUT_MS=5000
+JEV_SHADOW_DB=          # database for the jev_shadow collection, defaults to the one in MONGODB_URI
 ```
 
 Check a single message manually:
