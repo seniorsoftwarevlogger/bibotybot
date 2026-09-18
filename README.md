@@ -91,3 +91,5 @@ Admins can control whether links are allowed in specific threads by using comman
 3. The bot will confirm that links are now blocked in that thread
 
 **Note**: Only administrators can use these commands. The settings persist across bot restarts and are stored in the database.
+
+4. **Admin `/promote`**: A chat admin (including an anonymous admin) or an admin of one of the `ME` channels sends `/promote @username`, or replies `/promote` to a user's message. The bot shows buttons with ranks (kB / MB / GB / TB) plus "Сбросить"; an admin's click grants that rank out of turn. The user is treated as having at least that rank's message count, so the matching permissions (links, media) unlock too. Overrides are stored in the `level_overrides` collection in the database from `MONGODB_URI`. The bot can't resolve `@username` on its own, so it remembers usernames of people who have posted (`known_users`); for someone it hasn't seen yet, reply to their message.

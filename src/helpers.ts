@@ -6,6 +6,10 @@ export function isStatCommand(ctx: { message?: { text?: string } }): boolean {
   );
 }
 
+export function isPromoteCommand(ctx: { message?: { text?: string } }): boolean {
+  return /^\/promote(?:@\w+)?(?:\s|$)/.test(ctx.message?.text ?? "");
+}
+
 export function boostCacheKey(channelId: number | string, userId: number | string): string {
   return `${channelId}:${userId}`;
 }
