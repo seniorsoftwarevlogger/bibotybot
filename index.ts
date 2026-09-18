@@ -244,10 +244,17 @@ async function replyWithStat(ctx) {
 }
 
 async function replyAndDeleteStat(ctx, text) {
+  const commandId = ctx.message.message_id;
   const botReply = await ctx.reply(text, {
     reply_parameters: {
-      message_id: ctx.message.message_id,
+      message_id: commandId,
+      allow_sending_without_reply: true,
     },
+  });
+
+  // The command itself is noise in the chat — drop it once the reply is out.
+  ctx.deleteMessage(commandId).catch((error) => {
+    console.log("CANT DELETE STAT COMMAND:", commandId, error);
   });
 
   setTimeout(() => {
