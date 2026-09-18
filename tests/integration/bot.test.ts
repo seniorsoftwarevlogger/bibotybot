@@ -25,12 +25,14 @@ import { classifyMessageOpenAI } from "../../src/openaiClassifier.ts";
 import { getLevel, initPermissions, invalidate, THRESHOLDS } from "../../src/permissions.ts";
 import { blockUser, deleteMediaMessage, deleteMessage, muteFor24h } from "../../src/lib.ts";
 import { hasLinks } from "../../src/helpers.ts";
+import { initPromote, rememberUser, setupPromote } from "../../src/promote.ts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
 const TOKEN = "111222333:TestBotToken_MSW";
 const CHAT_ID = -1001234567890;
 const MSG_ID = 100;
+const ADMIN_ID = 777;
 
 // ── MSW Telegram Bot API stub ─────────────────────────────────────────────────
 
@@ -45,6 +47,13 @@ const server = setupServer(
 
       if (params.method === "copyMessage") {
         return HttpResponse.json({ ok: true, result: { message_id: 999 } });
+      }
+      if (params.method === "getChatMember") {
+        const status = body.user_id === ADMIN_ID ? "administrator" : "member";
+        return HttpResponse.json({
+          ok: true,
+          result: { status, user: { id: body.user_id, is_bot: false, first_name: "U", username: `u${body.user_id}` } },
+        });
       }
       if (params.method === "sendMessage") {
         return HttpResponse.json({ ok: true, result: { message_id: 998 } });
@@ -275,5 +284,134 @@ describe("media filter", () => {
     await bot.handleUpdate(makePhotoUpdate(userId));
 
     expect(calledMethods()).not.toContain("deleteMessage");
+  });
+});
+
+describe("/promote", () => {
+  const TARGET_ID = 4001;
+  let overrideDoc: { messages: number } | null = null;
+
+  function buildPromoteBot() {
+    const stats = { findOne: vi.fn().mockResolvedValue({ messages: 2 }) };
+    const overrides = {
+      findOne: vi.fn(async () => overrideDoc),
+      updateOne: vi.fn(async (_q: unknown, update: any) => {
+        overrideDoc = { messages: update.$set.messages };
+      }),
+      deleteOne: vi.fn(async () => {
+        overrideDoc = null;
+      }),
+    };
+    const knownUsers = { findOne: vi.fn(async () => null), updateOne: vi.fn(async () => ({})) };
+    initPermissions(
+      { collection: () => stats } as unknown as Db,
+      { collection: () => overrides } as unknown as Db
+    );
+    initPromote({ collection: () => knownUsers } as unknown as Db);
+
+    const bot = new Telegraf(TOKEN);
+    bot.botInfo = { id: 1, is_bot: true, first_name: "Bot", username: "bibotybot" } as any;
+    const applyRankTag = vi.fn();
+    bot.use((ctx, next) => {
+      rememberUser(ctx.message?.from);
+      return next();
+    });
+    setupPromote(bot, { myChannels: [], applyRankTag });
+    const passedThrough = vi.fn();
+    bot.use(passedThrough);
+    return { bot, applyRankTag, passedThrough };
+  }
+
+  function commandUpdate(fromId: number, text: string, entities: any[]) {
+    return {
+      update_id: 10,
+      message: {
+        message_id: MSG_ID,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: CHAT_ID, type: "supergroup" },
+        from: { id: fromId, is_bot: false, first_name: "Admin" },
+        text,
+        entities,
+      },
+    } as any;
+  }
+
+  function clickUpdate(fromId: number, data: string) {
+    return {
+      update_id: 11,
+      callback_query: {
+        id: "cb1",
+        from: { id: fromId, is_bot: false, first_name: "X" },
+        chat_instance: "1",
+        data,
+        message: {
+          message_id: 998,
+          date: 0,
+          chat: { id: CHAT_ID, type: "supergroup" },
+          text: "Уровень для @target",
+        },
+      },
+    } as any;
+  }
+
+  beforeEach(() => {
+    overrideDoc = null;
+    invalidate(CHAT_ID, TARGET_ID);
+  });
+
+  it("shows rank buttons for an @username the bot has seen, and a click sets the rank", async () => {
+    const { bot, applyRankTag } = buildPromoteBot();
+    // The target posted before, so the bot knows @target's id.
+    await bot.handleUpdate({
+      update_id: 9,
+      message: {
+        message_id: 50,
+        date: 0,
+        chat: { id: CHAT_ID, type: "supergroup" },
+        from: { id: TARGET_ID, is_bot: false, first_name: "T", username: "Target" },
+        text: "hi",
+      },
+    } as any);
+    capturedCalls.length = 0;
+
+    await bot.handleUpdate(
+      commandUpdate(ADMIN_ID, "/promote @target", [
+        { type: "bot_command", offset: 0, length: 8 },
+        { type: "mention", offset: 9, length: 7 },
+      ])
+    );
+
+    const prompt = capturedCalls.find((c) => c.method === "sendMessage");
+    const buttons = (prompt?.body.reply_markup as any).inline_keyboard.flat();
+    expect(buttons.map((b: any) => b.callback_data)).toContain(`promote:${TARGET_ID}:MB`);
+    expect(calledMethods()).toContain("deleteMessage"); // admin's command is cleaned up
+
+    capturedCalls.length = 0;
+    await bot.handleUpdate(clickUpdate(ADMIN_ID, `promote:${TARGET_ID}:MB`));
+
+    expect(overrideDoc).toEqual({ messages: 50 });
+    expect(applyRankTag).toHaveBeenCalledWith(CHAT_ID, TARGET_ID, "MB");
+    const edit = capturedCalls.find((c) => c.method === "editMessageText");
+    expect(edit?.body.text).toContain("MB");
+  });
+
+  it("ignores clicks from non-admins", async () => {
+    const { bot, applyRankTag } = buildPromoteBot();
+
+    await bot.handleUpdate(clickUpdate(5555, `promote:${TARGET_ID}:TB`));
+
+    expect(overrideDoc).toBeNull();
+    expect(applyRankTag).not.toHaveBeenCalled();
+    const answer = capturedCalls.find((c) => c.method === "answerCallbackQuery");
+    expect(answer?.body.show_alert).toBe(true);
+  });
+
+  it("lets /promote from a regular member fall through to the other filters", async () => {
+    const { bot, passedThrough } = buildPromoteBot();
+
+    await bot.handleUpdate(commandUpdate(5555, "/promote", []));
+
+    expect(passedThrough).toHaveBeenCalled();
+    expect(calledMethods()).not.toContain("sendMessage");
   });
 });

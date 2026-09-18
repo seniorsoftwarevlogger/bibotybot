@@ -16,6 +16,7 @@ import {
 } from "./src/lib.ts";
 import { classifyMessageOpenAI } from "./src/openaiClassifier.ts";
 import { initSpamShadow, logSpamShadow } from "./src/spamShadow.ts";
+import { initPromote, rememberUser, setupPromote } from "./src/promote.ts";
 import {
   getLevel,
   getRank,
@@ -29,6 +30,7 @@ import {
   isChannelBot,
   isMe,
   isOwnChannelExternalReply,
+  isPromoteCommand,
   isStatCommand,
   isTelegramServiceUser,
 } from "./src/helpers.ts";
@@ -52,8 +54,10 @@ const {
 const mongo = new MongoClient(MONGODB_URI);
 await mongo.connect();
 
-// Read message counters from achivator bot's database (same cluster).
-initPermissions(mongo.db("achivator_bot"));
+// Read message counters from achivator bot's database (same cluster). Levels
+// granted by admins via /promote live in our own database from MONGODB_URI.
+initPermissions(mongo.db("achivator_bot"), mongo.db());
+initPromote(mongo.db());
 
 // Store Jev shadow-mode comparisons for offline evaluation. Defaults to the
 // database from MONGODB_URI, the only one this user is allowed to write to.
@@ -129,6 +133,16 @@ const assignedRanks = new Map<string, Rank>();
 
 const goodCitizens = bloom.BloomFilter.create(1000000, 0.01);
 
+function applyRankTag(chatId: number, userId: number, rank: Rank) {
+  const rankKey = `${chatId}:${userId}`;
+  if (assignedRanks.get(rankKey) === rank) return;
+  assignedRanks.set(rankKey, rank);
+  (bot.telegram as any)
+    .callApi("setChatMemberTag", { chat_id: chatId, user_id: userId, tag: rank ?? "" })
+    .catch((error: unknown) => {
+      console.error(`Failed to set rank tag "${rank}" for user ${userId} in chat ${chatId}:`, error);
+    });
+}
 
 bot.use(async (ctx, next) => {
   const boosted = await boostedChannel(ctx);
@@ -147,7 +161,14 @@ bot.use(async (ctx, next) => {
     }, media ${level?.canMedia ?? "n/a"}`
   );
 
-  if ((isMe(ctx, myChannels) || family) && !isStatCommand(ctx)) return; // stop processing
+  rememberUser(ctx.message?.from);
+
+  if (
+    (isMe(ctx, myChannels) || family) &&
+    !isStatCommand(ctx) &&
+    !isPromoteCommand(ctx)
+  )
+    return; // stop processing
 
   ctx.state = ctx.state || {};
   ctx.state.boosted = boosted;
@@ -156,19 +177,15 @@ bot.use(async (ctx, next) => {
     ctx.state.level = level;
 
     const rank = getRank(level.messageCount);
-    const rankKey = `${chatId}:${id}`;
-    if (rank !== null && assignedRanks.get(rankKey) !== rank) {
-      assignedRanks.set(rankKey, rank);
-      (ctx.telegram as any)
-        .callApi("setChatMemberTag", { chat_id: chatId, user_id: id, tag: rank })
-        .catch((error: unknown) => {
-          console.error(`Failed to set rank tag "${rank}" for user ${id} in chat ${chatId}:`, error);
-        });
-    }
+    if (rank !== null) applyRankTag(chatId, id, rank);
   }
 
   return next();
 });
+
+// Before the channel-post filter, so admins can /promote while posting as the channel.
+setupPromote(bot, { myChannels, applyRankTag });
+
 bot.use(async (ctx, next) => {
   console.debug("isChannelBot", isChannelBot(ctx));
   if (!isChannelBot(ctx)) return next();
@@ -209,13 +226,14 @@ async function replyWithStat(ctx) {
   const family = Boolean(target.username && FAMILY.includes(target.username));
   const name = target.username ? `@${target.username}` : target.first_name;
   const rank = getRank(level.messageCount);
+  const manual = level.override !== null && level.override > level.realMessageCount;
 
   await replyAndDeleteStat(
     ctx,
     [
       `Статистика ${name}:`,
-      `Сообщений: ${level.messageCount}`,
-      `Ранг: ${rank ?? "—"}`,
+      `Сообщений: ${level.realMessageCount}`,
+      `Ранг: ${rank ?? "—"}${manual ? " (назначен админом)" : ""}`,
       `Реакции: ${level.canReact ? "можно" : `нужно ${THRESHOLDS.react}`}`,
       `Ссылки: ${level.canLink ? "можно" : `нужно ${THRESHOLDS.link}`}`,
       `Медиа: ${level.canMedia ? "можно" : `нужно ${THRESHOLDS.media}`}`,
@@ -555,6 +573,15 @@ const launchOptions =
 await bot.telegram
   .setMyCommands([{ command: "stat", description: "show user stats" }])
   .catch((error) => console.error("Failed to set bot commands:", error));
+await bot.telegram
+  .setMyCommands(
+    [
+      { command: "stat", description: "show user stats" },
+      { command: "promote", description: "назначить уровень: /promote @username" },
+    ],
+    { scope: { type: "all_chat_administrators" } }
+  )
+  .catch((error) => console.error("Failed to set admin commands:", error));
 
 bot.launch(
   {
