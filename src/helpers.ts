@@ -10,6 +10,10 @@ export function isPromoteCommand(ctx: { message?: { text?: string } }): boolean 
   return /^\/promote(?:@\w+)?(?:\s|$)/.test(ctx.message?.text ?? "");
 }
 
+export function isUnbanCommand(ctx: { message?: { text?: string } }): boolean {
+  return /^\/unban(?:@\w+)?(?:\s|$)/.test(ctx.message?.text ?? "");
+}
+
 export function boostCacheKey(channelId: number | string, userId: number | string): string {
   return `${channelId}:${userId}`;
 }

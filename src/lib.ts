@@ -62,6 +62,43 @@ export function restoreUserRights(telegram, chatId, userId) {
   });
 }
 
+// What a regular member of the group may do, i.e. the chat's default
+// permissions. Used when getChat doesn't return any (basic groups).
+const DEFAULT_MEMBER_PERMISSIONS = {
+  can_send_messages: true,
+  can_send_audios: true,
+  can_send_documents: true,
+  can_send_photos: true,
+  can_send_videos: true,
+  can_send_video_notes: true,
+  can_send_voice_notes: true,
+  can_send_polls: true,
+  can_send_other_messages: true,
+  can_add_web_page_previews: true,
+};
+
+// Lifts a ban or a restriction by returning the member to the chat's default
+// member permissions. Returns what it did: "unbanned" for a kicked member,
+// "restored" when an existing member's restrictions were lifted.
+export async function unbanUser(
+  telegram,
+  chatId,
+  userId
+): Promise<"unbanned" | "restored"> {
+  const member = await telegram.getChatMember(chatId, userId);
+  if (member.status === "kicked") {
+    await telegram.unbanChatMember(chatId, userId, { only_if_banned: true });
+    return "unbanned";
+  }
+
+  const chat = await telegram.getChat(chatId);
+  await telegram.restrictChatMember(chatId, userId, {
+    permissions: chat.permissions ?? DEFAULT_MEMBER_PERMISSIONS,
+    use_independent_chat_permissions: true,
+  });
+  return "restored";
+}
+
 // Ephemeral messages (Bot API 10.2): a group/supergroup message that is visible
 // only to the single member named by `receiver_user_id` — nobody else in the chat
 // sees it. We use them to privately tell a user why their message was removed,

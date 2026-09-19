@@ -60,17 +60,18 @@ export async function findUserIdByUsername(username: string): Promise<number | n
   return doc.user_id;
 }
 
-export type PromoteTarget =
+export type UserTarget =
   | { kind: "user"; user: TelegramUser }
   | { kind: "username"; username: string };
 
-// Target comes from, in order: a replied-to message, a mention of a user
-// without a username (text_mention), or an @username in the command.
-export function parsePromoteTarget(message: {
+// Shared by the admin commands (/promote, /unban). Target comes from, in
+// order: a replied-to message, a mention of a user without a username
+// (text_mention), or an @username in the command.
+export function parseUserTarget(message: {
   text?: string;
   entities?: Entity[];
   reply_to_message?: { from?: TelegramUser; sender_chat?: unknown };
-}, botUsername?: string): PromoteTarget | null {
+}, botUsername?: string): UserTarget | null {
   const replied = message.reply_to_message;
   if (
     replied?.from &&
@@ -195,7 +196,7 @@ export function setupPromote(
 
     ctx.deleteMessage(message.message_id).catch(() => {});
 
-    const target = parsePromoteTarget(message as any, ctx.botInfo?.username);
+    const target = parseUserTarget(message as any, ctx.botInfo?.username);
     if (!target) {
       const sent = await ctx.reply(
         "Укажите пользователя: /promote @username или ответьте командой на его сообщение."

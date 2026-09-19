@@ -3,28 +3,28 @@ import type { Collection, Db } from "mongodb";
 import {
   isAdmin,
   parsePromoteCallback,
-  parsePromoteTarget,
+  parseUserTarget,
   promoteKeyboard,
 } from "../../src/promote.ts";
 import { getLevel, initPermissions, setOverride } from "../../src/permissions.ts";
 
-describe("parsePromoteTarget", () => {
+describe("parseUserTarget", () => {
   it("takes the author of the replied-to message", () => {
     const from = { id: 42, first_name: "Alice" };
     expect(
-      parsePromoteTarget({ text: "/promote", reply_to_message: { from } })
+      parseUserTarget({ text: "/promote", reply_to_message: { from } })
     ).toEqual({ kind: "user", user: from });
   });
 
   it("ignores replies to channel posts and the Telegram service user", () => {
     expect(
-      parsePromoteTarget({
+      parseUserTarget({
         text: "/promote",
         reply_to_message: { from: { id: 1, first_name: "Telegram" } },
       })
     ).toBeNull();
     expect(
-      parsePromoteTarget({
+      parseUserTarget({
         text: "/promote",
         reply_to_message: { from: { id: 1, first_name: "Channel" }, sender_chat: {} },
       })
@@ -34,7 +34,7 @@ describe("parsePromoteTarget", () => {
   it("reads @username from a mention", () => {
     const text = "/promote @Alice_Dev";
     expect(
-      parsePromoteTarget({
+      parseUserTarget({
         text,
         entities: [
           { type: "bot_command", offset: 0, length: 8 },
@@ -47,7 +47,7 @@ describe("parsePromoteTarget", () => {
   it("skips a mention of the bot itself", () => {
     const text = "/promote @bibotybot @bob";
     expect(
-      parsePromoteTarget(
+      parseUserTarget(
         {
           text,
           entities: [
@@ -63,7 +63,7 @@ describe("parsePromoteTarget", () => {
   it("takes the user from a text_mention", () => {
     const user = { id: 7, first_name: "NoUsername" };
     expect(
-      parsePromoteTarget({
+      parseUserTarget({
         text: "/promote NoUsername",
         entities: [{ type: "text_mention", offset: 9, length: 10, user }],
       })
@@ -71,7 +71,7 @@ describe("parsePromoteTarget", () => {
   });
 
   it("returns null without a target", () => {
-    expect(parsePromoteTarget({ text: "/promote" })).toBeNull();
+    expect(parseUserTarget({ text: "/promote" })).toBeNull();
   });
 });
 

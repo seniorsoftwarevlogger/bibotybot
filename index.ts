@@ -17,6 +17,7 @@ import {
 import { classifyMessageOpenAI } from "./src/openaiClassifier.ts";
 import { initSpamShadow, logSpamShadow } from "./src/spamShadow.ts";
 import { initPromote, rememberUser, setupPromote } from "./src/promote.ts";
+import { setupUnban } from "./src/unban.ts";
 import {
   getLevel,
   getRank,
@@ -33,6 +34,7 @@ import {
   isPromoteCommand,
   isStatCommand,
   isTelegramServiceUser,
+  isUnbanCommand,
 } from "./src/helpers.ts";
 
 // Setup =======================================================================
@@ -166,7 +168,8 @@ bot.use(async (ctx, next) => {
   if (
     (isMe(ctx, myChannels) || family) &&
     !isStatCommand(ctx) &&
-    !isPromoteCommand(ctx)
+    !isPromoteCommand(ctx) &&
+    !isUnbanCommand(ctx)
   )
     return; // stop processing
 
@@ -183,8 +186,9 @@ bot.use(async (ctx, next) => {
   return next();
 });
 
-// Before the channel-post filter, so admins can /promote while posting as the channel.
+// Before the channel-post filter, so admins can /promote and /unban while posting as the channel.
 setupPromote(bot, { myChannels, applyRankTag });
+setupUnban(bot, { myChannels });
 
 bot.use(async (ctx, next) => {
   console.debug("isChannelBot", isChannelBot(ctx));
@@ -585,6 +589,7 @@ await bot.telegram
     [
       { command: "stat", description: "show user stats" },
       { command: "promote", description: "назначить уровень: /promote @username" },
+      { command: "unban", description: "снять бан или ограничения: /unban @username" },
     ],
     { scope: { type: "all_chat_administrators" } }
   )

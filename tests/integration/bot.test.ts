@@ -26,6 +26,7 @@ import { getLevel, initPermissions, invalidate, THRESHOLDS } from "../../src/per
 import { blockUser, deleteMediaMessage, deleteMessage, muteFor24h } from "../../src/lib.ts";
 import { hasLinks } from "../../src/helpers.ts";
 import { initPromote, rememberUser, setupPromote } from "../../src/promote.ts";
+import { setupUnban } from "../../src/unban.ts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -33,6 +34,24 @@ const TOKEN = "111222333:TestBotToken_MSW";
 const CHAT_ID = -1001234567890;
 const MSG_ID = 100;
 const ADMIN_ID = 777;
+const KICKED_ID = 4100;
+
+// What regular members of the group may do — the defaults /unban restores.
+const GROUP_PERMISSIONS = {
+  can_send_messages: true,
+  can_send_audios: true,
+  can_send_documents: true,
+  can_send_photos: true,
+  can_send_videos: true,
+  can_send_video_notes: true,
+  can_send_voice_notes: true,
+  can_send_polls: true,
+  can_send_other_messages: true,
+  can_add_web_page_previews: true,
+  can_invite_users: false,
+  can_pin_messages: false,
+  can_change_info: false,
+};
 
 // ── MSW Telegram Bot API stub ─────────────────────────────────────────────────
 
@@ -49,10 +68,21 @@ const server = setupServer(
         return HttpResponse.json({ ok: true, result: { message_id: 999 } });
       }
       if (params.method === "getChatMember") {
-        const status = body.user_id === ADMIN_ID ? "administrator" : "member";
+        const status =
+          body.user_id === ADMIN_ID
+            ? "administrator"
+            : body.user_id === KICKED_ID
+              ? "kicked"
+              : "member";
         return HttpResponse.json({
           ok: true,
           result: { status, user: { id: body.user_id, is_bot: false, first_name: "U", username: `u${body.user_id}` } },
+        });
+      }
+      if (params.method === "getChat") {
+        return HttpResponse.json({
+          ok: true,
+          result: { id: CHAT_ID, type: "supergroup", permissions: GROUP_PERMISSIONS },
         });
       }
       if (params.method === "sendMessage") {
@@ -412,6 +442,105 @@ describe("/promote", () => {
     await bot.handleUpdate(commandUpdate(5555, "/promote", []));
 
     expect(passedThrough).toHaveBeenCalled();
+    expect(calledMethods()).not.toContain("sendMessage");
+  });
+});
+
+describe("/unban", () => {
+  const TARGET_ID = 4002;
+
+  function buildUnbanBot(knownUserId: number) {
+    const knownUsers = {
+      findOne: vi.fn(async () => ({ user_id: knownUserId })),
+      updateOne: vi.fn(async () => ({})),
+    };
+    initPromote({ collection: () => knownUsers } as unknown as Db);
+
+    const bot = new Telegraf(TOKEN);
+    bot.botInfo = { id: 1, is_bot: true, first_name: "Bot", username: "bibotybot" } as any;
+    setupUnban(bot, { myChannels: [] });
+    const passedThrough = vi.fn();
+    bot.use(passedThrough);
+    return { bot, passedThrough };
+  }
+
+  function unbanCommandUpdate(fromId: number, text: string, username?: string) {
+    const entities: any[] = [{ type: "bot_command", offset: 0, length: 6 }];
+    if (username) {
+      entities.push({ type: "mention", offset: 7, length: username.length + 1 });
+    }
+    return {
+      update_id: 20,
+      message: {
+        message_id: MSG_ID,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: CHAT_ID, type: "supergroup" },
+        from: { id: fromId, is_bot: false, first_name: "Admin" },
+        text,
+        entities,
+      },
+    } as any;
+  }
+
+  it("restores the group's default permissions for a restricted member", async () => {
+    const { bot } = buildUnbanBot(TARGET_ID);
+
+    await bot.handleUpdate(unbanCommandUpdate(ADMIN_ID, "/unban @limited", "limited"));
+
+    const restrict = capturedCalls.find((c) => c.method === "restrictChatMember");
+    expect(restrict?.body.user_id).toBe(TARGET_ID);
+    expect(restrict?.body.permissions).toEqual(GROUP_PERMISSIONS);
+    expect(restrict?.body.use_independent_chat_permissions).toBe(true);
+    expect(calledMethods()).not.toContain("unbanChatMember");
+
+    const notice = capturedCalls.find((c) => c.method === "sendMessage");
+    expect(notice?.body.text).toContain("@limited");
+  });
+
+  it("takes the target from the replied-to message", async () => {
+    const { bot } = buildUnbanBot(0);
+
+    await bot.handleUpdate({
+      update_id: 21,
+      message: {
+        message_id: MSG_ID,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: CHAT_ID, type: "supergroup" },
+        from: { id: ADMIN_ID, is_bot: false, first_name: "Admin" },
+        text: "/unban",
+        entities: [{ type: "bot_command", offset: 0, length: 6 }],
+        reply_to_message: {
+          message_id: 50,
+          date: 0,
+          chat: { id: CHAT_ID, type: "supergroup" },
+          from: { id: TARGET_ID, is_bot: false, first_name: "T", username: "replied" },
+          text: "hi",
+        },
+      },
+    } as any);
+
+    const restrict = capturedCalls.find((c) => c.method === "restrictChatMember");
+    expect(restrict?.body.user_id).toBe(TARGET_ID);
+  });
+
+  it("unbans a kicked member instead of restricting", async () => {
+    const { bot } = buildUnbanBot(KICKED_ID);
+
+    await bot.handleUpdate(unbanCommandUpdate(ADMIN_ID, "/unban @kicked", "kicked"));
+
+    const unban = capturedCalls.find((c) => c.method === "unbanChatMember");
+    expect(unban?.body.user_id).toBe(KICKED_ID);
+    expect(unban?.body.only_if_banned).toBe(true);
+    expect(calledMethods()).not.toContain("restrictChatMember");
+  });
+
+  it("lets /unban from a regular member fall through to the other filters", async () => {
+    const { bot, passedThrough } = buildUnbanBot(TARGET_ID);
+
+    await bot.handleUpdate(unbanCommandUpdate(5555, "/unban"));
+
+    expect(passedThrough).toHaveBeenCalled();
+    expect(calledMethods()).not.toContain("restrictChatMember");
     expect(calledMethods()).not.toContain("sendMessage");
   });
 });
