@@ -12,6 +12,7 @@ import {
   deleteMessage,
   deleteUserReaction,
   muteFor24h,
+  restrictReactionsFor,
   restoreUserRights,
 } from "./src/lib.ts";
 import { classifyMessageOpenAI } from "./src/openaiClassifier.ts";
@@ -304,19 +305,68 @@ async function isSpam(text: string): Promise<boolean> {
   return await classifyMessageOpenAI(text);
 }
 
-bot.on(message("text"), async (ctx, next) => {
-  // delete if the message has a lots of custom emojis
-  if (ctx.message.entities?.some((entity) => entity.type === "custom_emoji")) {
-    const emojis = ctx.message.entities
-      .filter((entity) => entity.type === "custom_emoji")
-      .map((entity) => entity.custom_emoji_id);
-
-    if (emojis.length > 5) {
-      deleteMessage(ctx, "Сообщение содержит много эмодзи, удалено.");
-      return;
-    }
+// Emoji-flood strikes: the first hit is soft (rules message + a minute without
+// reactions), a repeat within the window falls back to the full block.
+const EMOJI_LIMIT = 5;
+const EMOJI_REACTION_RESTRICTION_MS = 60 * 1000;
+const EMOJI_STRIKE_WINDOW_MS = 60 * 60 * 1000;
+const emojiStrikes = new Map<string, number>();
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, expiresAt] of emojiStrikes) {
+    if (expiresAt <= now) emojiStrikes.delete(key);
   }
-  return next();
+}, 10 * 60 * 1000);
+
+bot.on(message("text"), async (ctx, next) => {
+  const customEmojiCount =
+    ctx.message.entities?.filter((entity) => entity.type === "custom_emoji")
+      .length ?? 0;
+  if (customEmojiCount <= EMOJI_LIMIT) return next();
+
+  const chatId = ctx.chat.id;
+  const userId = ctx.message.from?.id;
+  const strikeKey = `${chatId}:${userId}`;
+  const now = Date.now();
+  const previousStrike = emojiStrikes.get(strikeKey);
+  const isRepeat = previousStrike !== undefined && previousStrike > now;
+
+  if (isRepeat) {
+    emojiStrikes.delete(strikeKey);
+    console.log(
+      `Emoji gate: blocking repeat offender ${userId} in chat ${chatId}`
+    );
+    deleteMessage(
+      ctx,
+      "Снова больше 5 кастомных эмодзи в течение часа — блокировка.\nТекст поста перемещен в карантин @ssv_purge"
+    );
+    return;
+  }
+
+  emojiStrikes.set(strikeKey, now + EMOJI_STRIKE_WINDOW_MS);
+  console.log(`Emoji gate: first strike for ${userId} in chat ${chatId}`);
+  await deleteMessage(
+    ctx,
+    [
+      "Правила чата: в одном сообщении не больше 5 кастомных эмодзи.",
+      "Сообщение удалено и перемещено в карантин @ssv_purge.",
+      "Реакции отключены на 1 минуту. Повторное нарушение в течение часа — блокировка.",
+    ].join("\n"),
+    { mute: false }
+  );
+  if (userId) {
+    restrictReactionsFor(
+      ctx.telegram,
+      chatId,
+      userId,
+      EMOJI_REACTION_RESTRICTION_MS
+    ).catch((error) => {
+      console.error(
+        `Failed to restrict reactions of user ${userId} in chat ${chatId}:`,
+        error
+      );
+    });
+  }
 });
 
 // Update the middleware for spam filtering

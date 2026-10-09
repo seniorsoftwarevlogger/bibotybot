@@ -45,6 +45,30 @@ export function deleteUserReaction(telegram, chatId, messageId, userId) {
   });
 }
 
+// Temporary reaction-only restriction: everything else stays allowed.
+// restrictChatMember replaces the whole permission set, so each capability
+// must be passed back explicitly. Telegram treats an until_date less than 30
+// seconds away as "forever", so durations must stay above that.
+export function restrictReactionsFor(telegram, chatId, userId, durationMs) {
+  const untilDate = Math.floor((Date.now() + durationMs) / 1000);
+  return telegram.restrictChatMember(chatId, userId, {
+    until_date: untilDate,
+    permissions: {
+      can_send_messages: true,
+      can_send_audios: true,
+      can_send_documents: true,
+      can_send_photos: true,
+      can_send_videos: true,
+      can_send_video_notes: true,
+      can_send_voice_notes: true,
+      can_send_polls: true,
+      can_send_other_messages: true,
+      can_add_web_page_previews: true,
+      can_react_to_messages: false,
+    },
+  });
+}
+
 export function restoreUserRights(telegram, chatId, userId) {
   telegram.restrictChatMember(chatId, userId, {
     permissions: {

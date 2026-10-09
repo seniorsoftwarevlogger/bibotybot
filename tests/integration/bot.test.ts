@@ -23,7 +23,13 @@ import type { Collection, Db } from "mongodb";
 
 import { classifyMessageOpenAI } from "../../src/openaiClassifier.ts";
 import { getLevel, initPermissions, invalidate, THRESHOLDS } from "../../src/permissions.ts";
-import { blockUser, deleteMediaMessage, deleteMessage, muteFor24h } from "../../src/lib.ts";
+import {
+  blockUser,
+  deleteMediaMessage,
+  deleteMessage,
+  muteFor24h,
+  restrictReactionsFor,
+} from "../../src/lib.ts";
 import { hasLinks } from "../../src/helpers.ts";
 import { initPromote, rememberUser, setupPromote } from "../../src/promote.ts";
 import { setupUnban } from "../../src/unban.ts";
@@ -157,7 +163,37 @@ function buildBot(opts: {
     await deleteMessage(ctx, "No links for you.");
   });
 
-  // ── middleware 3: spam filter ────────────────────────────────────────────
+  // ── middleware 3: custom-emoji flood filter ─────────────────────────────
+  const emojiStrikes = new Map<string, number>();
+  bot.on(message("text"), async (ctx, next) => {
+    const customEmojiCount =
+      ctx.message.entities?.filter((entity) => entity.type === "custom_emoji")
+        .length ?? 0;
+    if (customEmojiCount <= 5) return next();
+
+    const chatId = ctx.chat.id;
+    const userId = ctx.message.from.id;
+    const strikeKey = `${chatId}:${userId}`;
+    const now = Date.now();
+    const previousStrike = emojiStrikes.get(strikeKey);
+    const isRepeat = previousStrike !== undefined && previousStrike > now;
+
+    if (isRepeat) {
+      emojiStrikes.delete(strikeKey);
+      await deleteMessage(ctx, "Emoji repeat — blocked.");
+      return;
+    }
+
+    emojiStrikes.set(strikeKey, now + 60 * 60 * 1000);
+    await deleteMessage(ctx, "Правила чата: не больше 5 кастомных эмодзи.", {
+      mute: false,
+    });
+    await restrictReactionsFor(ctx.telegram, chatId, userId, 60_000).catch(
+      () => {}
+    );
+  });
+
+  // ── middleware 4: spam filter ────────────────────────────────────────────
   bot.on(message("text"), async (ctx, next) => {
     const spam = await classifyMessageOpenAI(ctx.message.text, openAIStub);
     if (!spam) return next();
@@ -167,7 +203,7 @@ function buildBot(opts: {
     ]);
   });
 
-  // ── middleware 4: media filter ───────────────────────────────────────────
+  // ── middleware 5: media filter ───────────────────────────────────────────
   bot.on(
     anyOf(message("photo"), message("video"), message("document"), message("sticker")),
     async (ctx) => {
@@ -286,6 +322,79 @@ describe("link filter", () => {
     await bot.handleUpdate(makeTextUpdate(userId, "Just a normal message"));
 
     expect(calledMethods()).not.toContain("copyMessage");
+  });
+});
+
+describe("custom-emoji flood filter", () => {
+  function customEmojiEntities(count: number) {
+    return Array.from({ length: count }, (_, i) => ({
+      type: "custom_emoji",
+      offset: i * 2,
+      length: 2,
+    }));
+  }
+
+  it("first offense: archives and deletes, sends the rules, takes reactions for a minute — no block", async () => {
+    const userId = 5001;
+    const bot = buildBot({ userId, messageCount: 0, isSpam: false });
+
+    await bot.handleUpdate(
+      makeTextUpdate(userId, "spam", customEmojiEntities(6))
+    );
+
+    expect(calledMethods()).toContain("copyMessage");
+    expect(calledMethods()).toContain("deleteMessage");
+
+    const notice = capturedCalls.find((c) => c.method === "sendMessage");
+    expect(notice?.body.receiver_user_id).toBe(userId);
+    expect(notice?.body.text).toContain("Правила чата");
+
+    const restrict = capturedCalls.find(
+      (c) => c.method === "restrictChatMember"
+    );
+    expect(restrict?.body.user_id).toBe(userId);
+    expect(restrict?.body.permissions.can_react_to_messages).toBe(false);
+    expect(restrict?.body.permissions.can_send_messages).toBe(true);
+    expect(restrict?.body.until_date).toBeGreaterThan(
+      Math.floor(Date.now() / 1000)
+    );
+  });
+
+  it("repeat within the strike window: back to the full block", async () => {
+    const userId = 5002;
+    const bot = buildBot({ userId, messageCount: 0, isSpam: false });
+
+    await bot.handleUpdate(
+      makeTextUpdate(userId, "spam", customEmojiEntities(6))
+    );
+    capturedCalls.length = 0;
+
+    await bot.handleUpdate(
+      makeTextUpdate(userId, "spam again", customEmojiEntities(6))
+    );
+
+    expect(calledMethods()).toContain("copyMessage");
+    expect(calledMethods()).toContain("deleteMessage");
+
+    const restrict = capturedCalls.find(
+      (c) => c.method === "restrictChatMember"
+    );
+    expect(restrict?.body.user_id).toBe(userId);
+    expect(restrict?.body.permissions.can_send_messages).toBe(false);
+    expect(restrict?.body.until_date).toBeUndefined(); // blockUser is open-ended
+  });
+
+  it("lets a message with a few custom emojis through", async () => {
+    const userId = 5003;
+    const bot = buildBot({ userId, messageCount: 0, isSpam: false });
+
+    await bot.handleUpdate(
+      makeTextUpdate(userId, "ok", customEmojiEntities(5))
+    );
+
+    expect(calledMethods()).not.toContain("copyMessage");
+    expect(calledMethods()).not.toContain("deleteMessage");
+    expect(calledMethods()).not.toContain("restrictChatMember");
   });
 });
 
