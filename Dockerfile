@@ -1,4 +1,4 @@
-FROM node:22.23.1-alpine3.24
+FROM node:26-alpine3.24
 
 RUN mkdir -p /home/node/app/node_modules && chown -R node:node /home/node/app
 
