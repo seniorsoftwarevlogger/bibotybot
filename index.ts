@@ -19,6 +19,8 @@ import { classifyMessageOpenAI } from "./src/openaiClassifier.ts";
 import { initSpamShadow, logSpamShadow } from "./src/spamShadow.ts";
 import { initPromote, rememberUser, setupPromote } from "./src/promote.ts";
 import { setupUnban } from "./src/unban.ts";
+import { setupJoinGate } from "./src/joinGate.ts";
+import { notifyModAction, setupModLog } from "./src/modLog.ts";
 import {
   getLevel,
   getRank,
@@ -36,6 +38,7 @@ import {
   isStatCommand,
   isTelegramServiceUser,
   isUnbanCommand,
+  normalizeEditedMessage,
 } from "./src/helpers.ts";
 
 // Setup =======================================================================
@@ -98,6 +101,13 @@ const bot = new Telegraf(BOT_TOKEN, {
 });
 bot.catch((error) => {
   console.error(error);
+});
+
+// Edited messages re-run the moderation gates below: otherwise a member could
+// post clean text and edit the links or spam in afterwards.
+bot.use((ctx, next) => {
+  normalizeEditedMessage(ctx);
+  return next();
 });
 
 // After bot.catch and before other middleware
@@ -190,6 +200,12 @@ bot.use(async (ctx, next) => {
 // Before the channel-post filter, so admins can /promote and /unban while posting as the channel.
 setupPromote(bot, { myChannels, applyRankTag });
 setupUnban(bot, { myChannels });
+setupModLog(bot, { myChannels });
+
+// Join gate needs to register early: its message middleware must run before
+// the content gates below (links, spam, media), and its chat_member handler
+// before the ban-replication handler further down, which doesn't call next().
+setupJoinGate(bot, { myChannels, family: () => FAMILY });
 
 bot.use(async (ctx, next) => {
   console.debug("isChannelBot", isChannelBot(ctx));
@@ -509,6 +525,18 @@ bot.on("message_reaction", async (ctx) => {
         error
       );
     });
+    notifyModAction(ctx.telegram, {
+      action: "mute24h",
+      target: {
+        kind: "user",
+        id: userId,
+        first_name: upd.user?.first_name,
+        username: upd.user?.username,
+      },
+      chatId,
+      chatTitle: ctx.chat?.title,
+      reason: "🤡-реакция (клоунская ловушка)",
+    });
     return;
   }
 
@@ -546,6 +574,18 @@ bot.on("message_reaction", async (ctx) => {
         `Failed to mute user ${userId} for repeat early reaction:`,
         error
       );
+    });
+    notifyModAction(ctx.telegram, {
+      action: "mute24h",
+      target: {
+        kind: "user",
+        id: userId,
+        first_name: upd.user?.first_name,
+        username: upd.user?.username,
+      },
+      chatId,
+      chatTitle: ctx.chat?.title,
+      reason: `повторная ранняя реакция (${level.messageCount}/${THRESHOLDS.react} сообщений)`,
     });
     return;
   }
@@ -664,9 +704,11 @@ process.once("SIGINT", () => bot.stop("SIGINT"));
 process.once("SIGTERM", () => bot.stop("SIGTERM"));
 
 async function boostedChannel(ctx) {
-  if (!ctx.hasOwnProperty("message")) return false;
-
-  const userId = ctx.message.from?.id;
+  // `ctx.message` is a prototype getter in Telegraf, not an own property, so
+  // hasOwnProperty("message") is always false — check the message itself.
+  // Without this the boost bypass never fired and edits from boosted users
+  // would be deleted by the link/media gates.
+  const userId = ctx.message?.from?.id;
   if (!userId) return false;
 
   return boostedUser(ctx.telegram, ctx.message, userId);

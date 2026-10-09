@@ -18,6 +18,19 @@ export function boostCacheKey(channelId: number | string, userId: number | strin
   return `${channelId}:${userId}`;
 }
 
+// Telegraf's `message()` filter only matches `update.message`, so edited
+// messages never reach the moderation gates on their own. Aliasing the edited
+// message into `update.message` lets the regular middleware re-check an edit
+// exactly like a fresh message. `updateType` stays "edited_message".
+export function normalizeEditedMessage(ctx: {
+  update: { message?: unknown; edited_message?: unknown };
+}): void {
+  const update = ctx.update;
+  if (update.edited_message && !update.message) {
+    update.message = update.edited_message;
+  }
+}
+
 export function isTelegramServiceUser(user: { first_name?: string }): boolean {
   return user.first_name === "Telegram";
 }

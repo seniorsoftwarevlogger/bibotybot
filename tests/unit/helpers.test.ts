@@ -7,6 +7,7 @@ import {
   isOwnChannelExternalReply,
   isStatCommand,
   isTelegramServiceUser,
+  normalizeEditedMessage,
 } from "../../src/helpers.ts";
 
 describe("boostCacheKey", () => {
@@ -37,6 +38,44 @@ describe("isStatCommand", () => {
     expect(isStatCommand({ message: { text: "hello" } })).toBe(false);
     expect(isStatCommand({ message: { text: "/ban" } })).toBe(false);
     expect(isStatCommand({ message: {} })).toBe(false);
+  });
+});
+
+describe("normalizeEditedMessage", () => {
+  it("aliases an edited message into update.message", () => {
+    const ctx = {
+      update: {
+        edited_message: { message_id: 1, text: "edited", chat: { id: -100 } },
+      },
+    };
+    normalizeEditedMessage(ctx);
+    expect(ctx.update.message).toBe(ctx.update.edited_message);
+  });
+
+  it("does not touch new-message updates", () => {
+    const ctx = {
+      update: { message: { message_id: 1, text: "new", chat: { id: -100 } } },
+    };
+    normalizeEditedMessage(ctx);
+    expect(ctx.update.message).toEqual({ message_id: 1, text: "new", chat: { id: -100 } });
+    expect("edited_message" in ctx.update).toBe(false);
+  });
+
+  it("does not overwrite message when both are present", () => {
+    const ctx = {
+      update: {
+        message: { message_id: 1, text: "original" },
+        edited_message: { message_id: 1, text: "edited" },
+      },
+    };
+    normalizeEditedMessage(ctx);
+    expect((ctx.update.message as { text: string }).text).toBe("original");
+  });
+
+  it("ignores updates without messages", () => {
+    const ctx = { update: { chat_member: { chat: { id: -100 } } } };
+    normalizeEditedMessage(ctx);
+    expect("message" in ctx.update).toBe(false);
   });
 });
 

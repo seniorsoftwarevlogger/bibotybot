@@ -31,8 +31,11 @@ import {
   restrictReactionsFor,
 } from "../../src/lib.ts";
 import { hasLinks } from "../../src/helpers.ts";
+import { normalizeEditedMessage } from "../../src/helpers.ts";
 import { initPromote, rememberUser, setupPromote } from "../../src/promote.ts";
 import { setupUnban } from "../../src/unban.ts";
+import { setupJoinGate } from "../../src/joinGate.ts";
+import { notifyModAction, setupModLog } from "../../src/modLog.ts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -651,5 +654,511 @@ describe("/unban", () => {
     expect(passedThrough).toHaveBeenCalled();
     expect(calledMethods()).not.toContain("restrictChatMember");
     expect(calledMethods()).not.toContain("sendMessage");
+  });
+});
+
+// ── Join gate ─────────────────────────────────────────────────────────────────
+
+describe("join gate", () => {
+  const NEW_USER_ID = 6001;
+
+  function buildJoinGateBot(
+    messageCount: number,
+    family: string[] = [],
+    opts: {
+      boosted?: boolean;
+      freshJoinWindowMs?: number;
+      restrictionTtlMs?: number;
+    } = {}
+  ) {
+    initPermissions(makeDbStub(messageCount));
+    const bot = new Telegraf(TOKEN);
+    bot.botInfo = { id: 1, is_bot: true, first_name: "Bot", username: "bibotybot" } as any;
+
+    // Mirror of the level middleware from index.ts, which the gate reads.
+    bot.use(async (ctx, next) => {
+      const id = ctx.message?.from?.id;
+      const chatId = ctx.chat?.id;
+      if (id && chatId && ctx.message) {
+        const level = await getLevel(chatId, id);
+        ctx.state = { ...ctx.state, level, boosted: opts.boosted ?? false };
+      }
+      return next();
+    });
+
+    setupJoinGate(bot, {
+      myChannels: [],
+      family: () => family,
+      freshJoinWindowMs: opts.freshJoinWindowMs,
+      restrictionTtlMs: opts.restrictionTtlMs,
+    });
+    return bot;
+  }
+
+  function memberUpdate(userId: number, oldStatus: string, newStatus: string) {
+    const user = {
+      id: userId,
+      is_bot: false,
+      first_name: "New",
+      username: `u${userId}`,
+    };
+    return {
+      update_id: 30,
+      chat_member: {
+        chat: { id: CHAT_ID, type: "supergroup", title: "Test Chat" },
+        from: { id: ADMIN_ID, is_bot: false, first_name: "Admin" },
+        date: Math.floor(Date.now() / 1000),
+        old_chat_member: { status: oldStatus, user },
+        new_chat_member: { status: newStatus, user },
+      },
+    } as any;
+  }
+
+  function joinUpdate(userId: number) {
+    return memberUpdate(userId, "left", "member");
+  }
+
+  function textUpdate(
+    userId: number,
+    messageId: number,
+    from: Record<string, unknown> = {}
+  ) {
+    return {
+      update_id: 31,
+      message: {
+        message_id: messageId,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: CHAT_ID, type: "supergroup", title: "Test Chat" },
+        from: {
+          id: userId,
+          is_bot: false,
+          first_name: "New",
+          username: `u${userId}`,
+          ...from,
+        },
+        text: "hello",
+      },
+    } as any;
+  }
+
+  // A "X joined the group" service message — the race-fallback join signal.
+  function serviceJoinUpdate(userId: number) {
+    return {
+      update_id: 32,
+      message: {
+        message_id: 50,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: CHAT_ID, type: "supergroup", title: "Test Chat" },
+        from: { id: ADMIN_ID, is_bot: false, first_name: "Admin" },
+        new_chat_members: [{ id: userId, is_bot: false, first_name: "New" }],
+      },
+    } as any;
+  }
+
+  function joinGateClickUpdate(fromId: number, data: string) {
+    return {
+      update_id: 33,
+      callback_query: {
+        id: "cb2",
+        from: { id: fromId, is_bot: false, first_name: "X" },
+        chat_instance: "1",
+        data,
+        message: {
+          message_id: 998,
+          date: 0,
+          chat: { id: CHAT_ID, type: "supergroup" },
+          text: "Добро пожаловать!",
+        },
+      },
+    } as any;
+  }
+
+  const captchaMessage = () =>
+    capturedCalls.find(
+      (c) => c.method === "sendMessage" && c.body.chat_id === CHAT_ID
+    );
+
+  it("a join alone restricts nobody and sends nothing", async () => {
+    const bot = buildJoinGateBot(0);
+
+    await bot.handleUpdate(joinUpdate(NEW_USER_ID));
+
+    expect(calledMethods()).not.toContain("restrictChatMember");
+    expect(calledMethods()).not.toContain("sendMessage");
+    expect(calledMethods()).not.toContain("deleteMessage");
+  });
+
+  it("gates a fresh joiner's first message with an in-thread captcha", async () => {
+    const userId = NEW_USER_ID + 1;
+    const bot = buildJoinGateBot(0);
+
+    await bot.handleUpdate(joinUpdate(userId));
+    await bot.handleUpdate(textUpdate(userId, MSG_ID));
+
+    // The held message is quarantined…
+    const copy = capturedCalls.find((c) => c.method === "copyMessage");
+    expect(copy?.body.chat_id).toBe("@ssv_purge");
+    expect(copy?.body.message_id).toBe(MSG_ID);
+
+    // …and the captcha is a reply to it, so it lands in the same thread.
+    const captcha = captchaMessage();
+    expect(captcha?.body.chat_id).toBe(CHAT_ID);
+    expect(captcha?.body.reply_parameters?.message_id).toBe(MSG_ID);
+    expect(captcha?.body.text).toContain("нажмите кнопку");
+    expect(captcha?.body.text).toContain("Правила чата");
+    const buttons = (captcha?.body.reply_markup as any).inline_keyboard.flat();
+    expect(buttons.map((b: any) => b.callback_data)).toContain(
+      `joingate:${CHAT_ID}:${userId}`
+    );
+
+    // The captcha is sent before the held message is deleted — reply_parameters
+    // only resolve to a live message.
+    expect(calledMethods().indexOf("sendMessage")).toBeLessThan(
+      calledMethods().indexOf("deleteMessage")
+    );
+
+    // The member is restricted until the captcha passes or its expiry.
+    const restrict = capturedCalls.find((c) => c.method === "restrictChatMember");
+    expect(restrict?.body.user_id).toBe(userId);
+    expect(restrict?.body.permissions.can_send_messages).toBe(false);
+    expect(restrict?.body.until_date).toBeGreaterThan(
+      Math.floor(Date.now() / 1000)
+    );
+  });
+
+  it("holds a second message silently while the captcha is unanswered", async () => {
+    const userId = NEW_USER_ID + 2;
+    const bot = buildJoinGateBot(0);
+
+    await bot.handleUpdate(joinUpdate(userId));
+    await bot.handleUpdate(textUpdate(userId, MSG_ID));
+    capturedCalls.length = 0;
+
+    await bot.handleUpdate(textUpdate(userId, MSG_ID + 1));
+
+    expect(calledMethods()).not.toContain("sendMessage");
+    expect(calledMethods()).not.toContain("restrictChatMember");
+    const copy = capturedCalls.find((c) => c.method === "copyMessage");
+    expect(copy?.body.message_id).toBe(MSG_ID + 1);
+    expect(calledMethods()).toContain("deleteMessage");
+  });
+
+  it("passing the captcha restores permissions and lifts the gate", async () => {
+    const userId = NEW_USER_ID + 3;
+    const bot = buildJoinGateBot(0);
+
+    await bot.handleUpdate(joinUpdate(userId));
+    await bot.handleUpdate(textUpdate(userId, MSG_ID));
+    capturedCalls.length = 0;
+
+    await bot.handleUpdate(
+      joinGateClickUpdate(userId, `joingate:${CHAT_ID}:${userId}`)
+    );
+
+    const restrict = capturedCalls.find((c) => c.method === "restrictChatMember");
+    expect(restrict?.body.user_id).toBe(userId);
+    expect(restrict?.body.permissions).toEqual(GROUP_PERMISSIONS);
+    expect(restrict?.body.use_independent_chat_permissions).toBe(true);
+
+    const edit = capturedCalls.find((c) => c.method === "editMessageText");
+    expect(edit?.body.text).toContain("Проверка пройдена");
+    const answer = capturedCalls.find(
+      (c) => c.method === "answerCallbackQuery"
+    );
+    expect(answer?.body.text).toContain("Добро пожаловать");
+
+    // Verified: the follow-up message is not re-gated.
+    capturedCalls.length = 0;
+    await bot.handleUpdate(textUpdate(userId, MSG_ID + 1));
+    expect(calledMethods()).not.toContain("sendMessage");
+    expect(calledMethods()).not.toContain("restrictChatMember");
+    expect(calledMethods()).not.toContain("deleteMessage");
+  });
+
+  it("lets a member established enough to react skip the captcha", async () => {
+    const userId = NEW_USER_ID + 4;
+    const bot = buildJoinGateBot(THRESHOLDS.react);
+
+    await bot.handleUpdate(joinUpdate(userId));
+    await bot.handleUpdate(textUpdate(userId, MSG_ID));
+
+    expect(calledMethods()).not.toContain("sendMessage");
+    expect(calledMethods()).not.toContain("restrictChatMember");
+    expect(calledMethods()).not.toContain("deleteMessage");
+  });
+
+  it("lets the family, bots, and boosted members skip the captcha", async () => {
+    const userId = NEW_USER_ID + 5;
+    const familyBot = buildJoinGateBot(0, ["family_guy"]);
+    await familyBot.handleUpdate(joinUpdate(userId));
+    await familyBot.handleUpdate(
+      textUpdate(userId, MSG_ID, { username: "family_guy" })
+    );
+
+    const botId = NEW_USER_ID + 6;
+    const bot = buildJoinGateBot(0);
+    await bot.handleUpdate(joinUpdate(botId));
+    await bot.handleUpdate(textUpdate(botId, MSG_ID, { is_bot: true }));
+
+    const boostedId = NEW_USER_ID + 7;
+    const boostedBot = buildJoinGateBot(0, [], { boosted: true });
+    await boostedBot.handleUpdate(joinUpdate(boostedId));
+    await boostedBot.handleUpdate(textUpdate(boostedId, MSG_ID));
+
+    expect(calledMethods()).not.toContain("sendMessage");
+    expect(calledMethods()).not.toContain("restrictChatMember");
+    expect(calledMethods()).not.toContain("deleteMessage");
+  });
+
+  it("a new_chat_members service message arms the gate but is not gated itself", async () => {
+    const userId = NEW_USER_ID + 8;
+    const bot = buildJoinGateBot(0);
+
+    await bot.handleUpdate(serviceJoinUpdate(userId));
+    expect(calledMethods()).not.toContain("sendMessage");
+
+    await bot.handleUpdate(textUpdate(userId, MSG_ID));
+    expect(captchaMessage()?.body.reply_parameters?.message_id).toBe(MSG_ID);
+  });
+
+  it("rejects a non-target click from a non-admin", async () => {
+    const userId = NEW_USER_ID + 9;
+    const bot = buildJoinGateBot(0);
+
+    await bot.handleUpdate(
+      joinGateClickUpdate(5555, `joingate:${CHAT_ID}:${userId}`)
+    );
+
+    expect(calledMethods()).not.toContain("restrictChatMember");
+    const answer = capturedCalls.find(
+      (c) => c.method === "answerCallbackQuery"
+    );
+    expect(answer?.body.text).toContain("не для вас");
+  });
+
+  it("an admin can pass the captcha for someone else", async () => {
+    const userId = NEW_USER_ID + 10;
+    const bot = buildJoinGateBot(0);
+
+    await bot.handleUpdate(
+      joinGateClickUpdate(ADMIN_ID, `joingate:${CHAT_ID}:${userId}`)
+    );
+
+    expect(calledMethods()).toContain("restrictChatMember");
+  });
+
+  it("leaving while the captcha is pending removes the captcha message", async () => {
+    const userId = NEW_USER_ID + 11;
+    const bot = buildJoinGateBot(0);
+
+    await bot.handleUpdate(joinUpdate(userId));
+    await bot.handleUpdate(textUpdate(userId, MSG_ID));
+    capturedCalls.length = 0;
+
+    await bot.handleUpdate(memberUpdate(userId, "member", "left"));
+
+    const del = capturedCalls.find((c) => c.method === "deleteMessage");
+    expect(del?.body.message_id).toBe(998); // the captcha message
+  });
+
+  it("the fresh-join window expires and the member is no longer gated", async () => {
+    const userId = NEW_USER_ID + 12;
+    const bot = buildJoinGateBot(0, [], { freshJoinWindowMs: 50 });
+
+    await bot.handleUpdate(joinUpdate(userId));
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    await bot.handleUpdate(textUpdate(userId, MSG_ID));
+
+    expect(calledMethods()).not.toContain("sendMessage");
+    expect(calledMethods()).not.toContain("restrictChatMember");
+  });
+
+  it("a message from a long-time member is not gated", async () => {
+    const bot = buildJoinGateBot(0);
+
+    await bot.handleUpdate(textUpdate(NEW_USER_ID + 13, MSG_ID));
+
+    expect(calledMethods()).not.toContain("sendMessage");
+    expect(calledMethods()).not.toContain("restrictChatMember");
+    expect(calledMethods()).not.toContain("deleteMessage");
+  });
+});
+
+// ── Mod log ───────────────────────────────────────────────────────────────────
+
+describe("mod log", () => {
+  const TARGET_ID = 7001;
+
+  function buildModLogBot() {
+    const bot = new Telegraf(TOKEN);
+    bot.botInfo = { id: 1, is_bot: true, first_name: "Bot", username: "bibotybot" } as any;
+    setupModLog(bot, { myChannels: [] });
+    return bot;
+  }
+
+  function modUnbanClickUpdate(fromId: number, data: string) {
+    return {
+      update_id: 40,
+      callback_query: {
+        id: "cb3",
+        from: { id: fromId, is_bot: false, first_name: "X", username: `x${fromId}` },
+        chat_instance: "1",
+        data,
+        message: {
+          message_id: 998,
+          date: 0,
+          chat: { id: CHAT_ID, type: "supergroup" },
+          text: "🚫 Блокировка",
+        },
+      },
+    } as any;
+  }
+
+  it("notifies the mod chat with a one-click unban button", async () => {
+    const bot = buildModLogBot();
+
+    await notifyModAction(bot.telegram, {
+      action: "block",
+      target: { kind: "user", id: TARGET_ID, first_name: "T", username: "target" },
+      chatId: CHAT_ID,
+      chatTitle: "Test Chat",
+      reason: "Ссылки за буст канала",
+      quarantineMessageId: 999,
+    });
+
+    const notice = capturedCalls.find((c) => c.method === "sendMessage");
+    expect(notice?.body.chat_id).toBe("@ssv_purge");
+    expect(notice?.body.text).toContain("Блокировка");
+    expect(notice?.body.text).toContain("@target");
+    expect(notice?.body.text).toContain("https://t.me/ssv_purge/999");
+    const buttons = (notice?.body.reply_markup as any).inline_keyboard.flat();
+    expect(buttons[0].callback_data).toBe(`modunban:${CHAT_ID}:${TARGET_ID}`);
+  });
+
+  it("notifies without a button when the actor is a channel", async () => {
+    const bot = buildModLogBot();
+
+    await notifyModAction(bot.telegram, {
+      action: "block",
+      target: { kind: "channel", id: -100555, username: "spamchannel" },
+      chatId: CHAT_ID,
+      chatTitle: "Test Chat",
+      reason: "Под каналом писать нельзя",
+    });
+
+    const notice = capturedCalls.find((c) => c.method === "sendMessage");
+    expect(notice?.body.reply_markup).toBeUndefined();
+  });
+
+  it("an admin's click on the unban button restores default permissions", async () => {
+    const bot = buildModLogBot();
+
+    await bot.handleUpdate(
+      modUnbanClickUpdate(ADMIN_ID, `modunban:${CHAT_ID}:${TARGET_ID}`)
+    );
+
+    const restrict = capturedCalls.find(
+      (c) => c.method === "restrictChatMember"
+    );
+    expect(restrict?.body.user_id).toBe(TARGET_ID);
+    expect(restrict?.body.permissions).toEqual(GROUP_PERMISSIONS);
+
+    const edit = capturedCalls.find((c) => c.method === "editMessageText");
+    expect(edit?.body.text).toContain("Ограничения снял @x777");
+  });
+
+  it("rejects clicks from non-admins", async () => {
+    const bot = buildModLogBot();
+
+    await bot.handleUpdate(
+      modUnbanClickUpdate(5555, `modunban:${CHAT_ID}:${TARGET_ID}`)
+    );
+
+    expect(calledMethods()).not.toContain("restrictChatMember");
+    const answer = capturedCalls.find(
+      (c) => c.method === "answerCallbackQuery"
+    );
+    expect(answer?.body.show_alert).toBe(true);
+  });
+});
+
+// ── Edited messages ───────────────────────────────────────────────────────────
+
+describe("edited messages", () => {
+  function buildEditGateBot(messageCount: number) {
+    initPermissions(makeDbStub(messageCount));
+    const bot = new Telegraf(TOKEN);
+
+    // Mirrors index.ts: alias the edited message so the gates re-check it.
+    bot.use((ctx, next) => {
+      normalizeEditedMessage(ctx);
+      return next();
+    });
+    bot.use(async (ctx, next) => {
+      const id = ctx.message?.from?.id;
+      const chatId = ctx.chat?.id;
+      if (id && chatId && ctx.message) {
+        ctx.state = {
+          ...ctx.state,
+          level: await getLevel(chatId, id),
+          boosted: false,
+        };
+      }
+      return next();
+    });
+    bot.on(message("text"), async (ctx, next) => {
+      if (!hasLinks(ctx)) return next();
+      if (ctx.state?.boosted || ctx.state?.level?.canLink) return next();
+      await deleteMessage(ctx, "No links for you.");
+    });
+
+    return bot;
+  }
+
+  function makeEditedUpdate(userId: number, text: string, entities?: any[]) {
+    return {
+      update_id: 50,
+      edited_message: {
+        message_id: MSG_ID,
+        date: Math.floor(Date.now() / 1000) - 60,
+        edit_date: Math.floor(Date.now() / 1000),
+        chat: { id: CHAT_ID, type: "supergroup" },
+        from: { id: userId, is_bot: false, first_name: "Test" },
+        text,
+        entities,
+      },
+    } as any;
+  }
+
+  it("a link edited into an old message is deleted and the sender blocked", async () => {
+    const userId = 8001;
+    const bot = buildEditGateBot(0);
+
+    await bot.handleUpdate(
+      makeEditedUpdate(userId, "See https://example.com", [
+        { type: "url", offset: 4, length: 19 },
+      ])
+    );
+
+    expect(calledMethods()).toContain("copyMessage");
+    expect(calledMethods()).toContain("deleteMessage");
+    expect(calledMethods()).toContain("restrictChatMember");
+
+    const copy = capturedCalls.find((c) => c.method === "copyMessage");
+    expect(copy?.body.message_id).toBe(MSG_ID);
+    const modLog = capturedCalls
+      .filter((c) => c.method === "sendMessage")
+      .find((c) => c.body.chat_id === "@ssv_purge");
+    expect(modLog?.body.text).toContain("Блокировка");
+  });
+
+  it("an edit without links passes untouched", async () => {
+    const userId = 8002;
+    const bot = buildEditGateBot(0);
+
+    await bot.handleUpdate(makeEditedUpdate(userId, "Just fixing a typo"));
+
+    expect(calledMethods()).not.toContain("copyMessage");
+    expect(calledMethods()).not.toContain("deleteMessage");
   });
 });

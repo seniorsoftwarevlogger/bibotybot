@@ -5,7 +5,7 @@ Simple bot that deletes t.me links from the channel posts.
 ### Start the bot
 
 ```
-NODE_ENV=production BOT_TOKEN= PORT= node index.js
+NODE_ENV=production BOT_TOKEN= PORT= node index.ts
 ```
 
 It will be listening on:
@@ -24,6 +24,7 @@ BOT_TOKEN=
 
 ```
 SENTRY_DSN=
+MOD_CHAT_ID=        # chat for moderation-action notifications, defaults to @ssv_purge
 ```
 
 ### Spam classifier (Jev shadow mode)
@@ -52,46 +53,18 @@ npm run jev -- "текст сообщения"
 
 ## Features
 
-1. **Ban Replication**: The bot now supports replicating ban events across all managed channels upon receiving a ban command from an admin.
+1. **Join gate**: the gate only arms when someone joins (the `chat_member` update, or the "X joined the group" service message) and fires on the member's **first message**: the message is quarantined, the captcha — a reply in the same thread with the chat rules and a "Я не бот ✅" button — replaces it, and the member is restricted until they press the button. Replying in the same thread keeps the captcha visible in the channel discussion's comment UI, which is the only place a comments-only member ever looks. Further messages are held silently while the captcha is unanswered; a pass restores the chat's default permissions and the captcha turns into a short-lived "Проверка пройдена" note. Nobody is ever kicked: members who never write are never touched, lurkers included. The gate is skipped for established members (5+ messages), the family, bots, and boosted members. The restriction self-expires, so a bot crash can never leave anyone muted forever.
 
-2. **Thread-specific Link Control**: Admins can allow or block links in specific threads.
+2. **Edited messages are re-checked**: the link, spam, emoji and media gates run on edits too, so posting clean text and editing the links in afterwards no longer bypasses moderation.
 
-3. **Ephemeral removal notices**: When the bot removes a user's message (spam, links, media, etc.), it tells that user *why* using a Telegram [ephemeral message](https://core.telegram.org/bots/features#ephemeral-messages) — a group message addressed to a single member via `receiver_user_id` that only they can see. This keeps the chat clean (no public "message deleted" warnings) while still notifying the offender privately. Requires a Bot API server that supports ephemeral messages (Bot API 10.2+); delivery is best-effort and failures are logged, not fatal.
+3. **Mod log with one-click unban**: every automated restriction (block, 24h mute) is announced to the mod chat (`MOD_CHAT_ID`, defaults to `@ssv_purge`) with the user, chat, reason and a link to the quarantined copy. Notifications about users carry a "Снять ограничения" button — admins of the affected chat press it to lift the restriction; the message is then updated with who did it.
+
+4. **Ban Replication**: when an admin bans a member in one of the managed chats (via the Telegram UI), the ban is automatically replicated to the other managed chats.
+
+5. **Ephemeral removal notices**: When the bot removes a user's message (spam, links, media, etc.), it tells that user *why* using a Telegram [ephemeral message](https://core.telegram.org/bots/features#ephemeral-messages) — a group message addressed to a single member via `receiver_user_id` that only they can see. This keeps the chat clean (no public "message deleted" warnings) while still notifying the offender privately. Requires a Bot API server that supports ephemeral messages (Bot API 10.2+); delivery is best-effort and failures are logged, not fatal.
 
    > Note: the Telegram Bot API does not deliver an update when a regular user deletes their *own* message in a group, so the notice is tied to the bot's own removals rather than user self-deletions.
 
-### Ban Replication Feature
+6. **Admin `/promote`**: A chat admin (including an anonymous admin) or an admin of one of the `ME` channels sends `/promote @username`, or replies `/promote` to a user's message. The bot shows buttons with ranks (kB / MB / GB / TB) plus "Сбросить"; an admin's click grants that rank out of turn. The user is treated as having at least that rank's message count, so the matching permissions (links, media) unlock too. Overrides are stored in the `level_overrides` collection in the database from `MONGODB_URI`. The bot can't resolve `@username` on its own, so it remembers usernames of people who have posted (`known_users`); for someone it hasn't seen yet, reply to their message.
 
-This new feature allows admins to issue a ban command that will be replicated across all channels managed by the bot. The ban propagates through the channels automatically.
-
-#### How to Issue a Ban Command
-
-Admins can issue a ban command in the following format:
-
-```
-/ban <user_id>
-```
-
-Where `<user_id>` is the unique identifier of the user to be banned. The bot will confirm once the user has been banned from all managed channels.
-
-### Thread-specific Link Control
-
-Admins can control whether links are allowed in specific threads by using commands.
-
-#### How to Allow Links in a Thread
-
-1. Reply to any message in the thread where you want to allow links
-2. Send the command: `/allowLinks`
-3. The bot will confirm that links are now allowed in that thread
-
-#### How to Block Links in a Thread
-
-1. Reply to any message in the thread where you want to block links
-2. Send the command: `/blockLinks`
-3. The bot will confirm that links are now blocked in that thread
-
-**Note**: Only administrators can use these commands. The settings persist across bot restarts and are stored in the database.
-
-4. **Admin `/promote`**: A chat admin (including an anonymous admin) or an admin of one of the `ME` channels sends `/promote @username`, or replies `/promote` to a user's message. The bot shows buttons with ranks (kB / MB / GB / TB) plus "Сбросить"; an admin's click grants that rank out of turn. The user is treated as having at least that rank's message count, so the matching permissions (links, media) unlock too. Overrides are stored in the `level_overrides` collection in the database from `MONGODB_URI`. The bot can't resolve `@username` on its own, so it remembers usernames of people who have posted (`known_users`); for someone it hasn't seen yet, reply to their message.
-
-5. **Admin `/unban`**: The same admins send `/unban @username`, or reply `/unban` to a user's message, to lift a restriction or a ban. A kicked member is unbanned; a restricted one gets the chat's default member permissions back (what regular members of the group can do), via `restrictChatMember` with `use_independent_chat_permissions`.
+7. **Admin `/unban`**: The same admins send `/unban @username`, or reply `/unban` to a user's message, to lift a restriction or a ban. A kicked member is unbanned; a restricted one gets the chat's default member permissions back (what regular members of the group can do), via `restrictChatMember` with `use_independent_chat_permissions`.

@@ -1,17 +1,33 @@
+import { modTargetFromMessage, notifyModAction } from "./modLog.ts";
+
+// Deleted messages are copied here before removal, so admins can review them.
+export const QUARANTINE_CHAT = "@ssv_purge";
+
+const ALL_MESSAGES_OFF = {
+  can_send_messages: false,
+  can_send_audios: false,
+  can_send_documents: false,
+  can_send_photos: false,
+  can_send_videos: false,
+  can_send_video_notes: false,
+  can_send_voice_notes: false,
+  can_send_polls: false,
+  can_send_other_messages: false,
+  can_add_web_page_previews: false,
+};
+
 export function blockUser(telegram, chatId, userId) {
   return telegram.restrictChatMember(chatId, userId, {
-    permissions: {
-      can_send_messages: false,
-      can_send_audios: false,
-      can_send_documents: false,
-      can_send_photos: false,
-      can_send_videos: false,
-      can_send_video_notes: false,
-      can_send_voice_notes: false,
-      can_send_polls: false,
-      can_send_other_messages: false,
-      can_add_web_page_previews: false,
-    },
+    permissions: ALL_MESSAGES_OFF,
+  });
+}
+
+// Same as blockUser but self-expires at `untilDate` — used by the join gate so
+// a crash can never leave a fresh member muted forever.
+export function blockUserUntil(telegram, chatId, userId, untilDate: number) {
+  return telegram.restrictChatMember(chatId, userId, {
+    until_date: untilDate,
+    permissions: ALL_MESSAGES_OFF,
   });
 }
 
@@ -19,18 +35,7 @@ export function muteFor24h(telegram, chatId, userId) {
   const untilDate = Math.floor(Date.now() / 1000) + 24 * 60 * 60;
   return telegram.restrictChatMember(chatId, userId, {
     until_date: untilDate,
-    permissions: {
-      can_send_messages: false,
-      can_send_audios: false,
-      can_send_documents: false,
-      can_send_photos: false,
-      can_send_videos: false,
-      can_send_video_notes: false,
-      can_send_voice_notes: false,
-      can_send_polls: false,
-      can_send_other_messages: false,
-      can_add_web_page_previews: false,
-    },
+    permissions: ALL_MESSAGES_OFF,
   });
 }
 
@@ -164,11 +169,17 @@ export function deleteMediaMessage(ctx, { mute = true, warning }: { mute?: boole
           ).catch((e) => console.log("CANT SEND EPHEMERAL:", userId, e))
         : undefined
     )
-    .then(() =>
-      mute
-        ? muteFor24h(ctx.telegram, ctx.chat.id, ctx.message.from.id)
-        : undefined
-    )
+    .then(() => {
+      if (!mute) return undefined;
+      notifyModAction(ctx.telegram, {
+        action: "mute24h",
+        target: modTargetFromMessage(ctx.message),
+        chatId: ctx.chat.id,
+        chatTitle: ctx.chat?.title,
+        reason: warningText,
+      });
+      return muteFor24h(ctx.telegram, ctx.chat.id, ctx.message.from.id);
+    })
     .catch((e) => console.log("CANT DELETE:", ctx.message, e))
     .finally(() => console.log("DELETED", ctx.message.message_id));
 }
@@ -176,10 +187,10 @@ export function deleteMessage(ctx, warningMessage, { mute = true }: { mute?: boo
   const userId = ctx.message.from?.id;
 
   return ctx.telegram
-    .copyMessage(`@ssv_purge`, ctx.chat.id, ctx.message.message_id, {
+    .copyMessage(QUARANTINE_CHAT, ctx.chat.id, ctx.message.message_id, {
       disable_notification: true,
     })
-    .then(() =>
+    .then((copy) =>
       ctx
         .deleteMessage(ctx.message.message_id)
         .then(() =>
@@ -192,9 +203,18 @@ export function deleteMessage(ctx, warningMessage, { mute = true }: { mute?: boo
               ).catch((e) => console.log("CANT SEND EPHEMERAL:", userId, e))
             : undefined
         )
-        .then(() =>
-          mute ? blockUser(ctx.telegram, ctx.chat.id, ctx.message.from.id) : undefined
-        )
+        .then(() => {
+          if (!mute) return undefined;
+          notifyModAction(ctx.telegram, {
+            action: "block",
+            target: modTargetFromMessage(ctx.message),
+            chatId: ctx.chat.id,
+            chatTitle: ctx.chat?.title,
+            reason: warningMessage,
+            quarantineMessageId: copy?.message_id,
+          });
+          return blockUser(ctx.telegram, ctx.chat.id, ctx.message.from.id);
+        })
         .catch((e) => console.log("CANT DELETE:", ctx.message, e))
         .finally(() => console.log("DELETED", ctx.message.message_id))
     );
