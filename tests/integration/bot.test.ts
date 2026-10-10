@@ -36,6 +36,12 @@ import { initPromote, rememberUser, setupPromote } from "../../src/promote.ts";
 import { setupUnban } from "../../src/unban.ts";
 import { setupJoinGate } from "../../src/joinGate.ts";
 import { notifyModAction, setupModLog } from "../../src/modLog.ts";
+import {
+  initThreadRules,
+  NO_THREAD_HINT,
+  setupThreadRules,
+  threadAllows,
+} from "../../src/threadRules.ts";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -1160,5 +1166,200 @@ describe("edited messages", () => {
 
     expect(calledMethods()).not.toContain("copyMessage");
     expect(calledMethods()).not.toContain("deleteMessage");
+  });
+});
+
+// ── Thread rules ──────────────────────────────────────────────────────────────
+
+describe("thread rules", () => {
+  const MEMBER_ID = 9001;
+
+  // The rules map is module state that outlives a test, so every test marks
+  // its own thread.
+  let threadSeq = 9100;
+  const newThread = () => threadSeq++;
+
+  async function buildThreadRuleBot(messageCount = 0) {
+    initPermissions(makeDbStub(messageCount));
+
+    const stored = new Map<string, Record<string, unknown>>();
+    const threadRules = {
+      find: vi.fn(() => ({ toArray: async () => [...stored.values()] })),
+      updateOne: vi.fn(
+        async (query: Record<string, unknown>, update: { $set: Record<string, unknown> }) => {
+          stored.set(`${query.chat_id}:${query.thread_id}`, { ...query, ...update.$set });
+        }
+      ),
+      deleteOne: vi.fn(async (query: Record<string, unknown>) => {
+        stored.delete(`${query.chat_id}:${query.thread_id}`);
+      }),
+    };
+    await initThreadRules({ collection: () => threadRules } as unknown as Db);
+
+    const bot = new Telegraf(TOKEN);
+    bot.botInfo = { id: 1, is_bot: true, first_name: "Bot", username: "bibotybot" } as any;
+
+    // Mirrors index.ts: the level middleware, then the thread-rule commands,
+    // then the gates that consult them.
+    bot.use(async (ctx, next) => {
+      const id = ctx.message?.from?.id;
+      if (id && ctx.chat && ctx.message) {
+        ctx.state = {
+          ...ctx.state,
+          level: await getLevel(ctx.chat.id, id),
+          boosted: false,
+        };
+      }
+      return next();
+    });
+    setupThreadRules(bot, { myChannels: [] });
+    bot.on(message("text"), async (ctx, next) => {
+      if (!hasLinks(ctx)) return next();
+      if (ctx.state?.boosted || ctx.state?.level?.canLink) return next();
+      if (threadAllows(ctx.chat.id, ctx.message.message_thread_id, "links")) {
+        return next();
+      }
+      await deleteMessage(ctx, "No links for you.");
+    });
+    bot.on(message("photo"), async (ctx) => {
+      if (ctx.state?.boosted || ctx.state?.level?.canMedia) return;
+      if (threadAllows(ctx.chat.id, ctx.message.message_thread_id, "media")) return;
+      await deleteMediaMessage(ctx);
+    });
+
+    const passedThrough = vi.fn();
+    bot.use(passedThrough);
+    return { bot, stored, passedThrough };
+  }
+
+  function threadUpdate(
+    fromId: number,
+    text: string,
+    commandLength: number,
+    threadId?: number
+  ) {
+    return {
+      update_id: 60,
+      message: {
+        message_id: MSG_ID,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: CHAT_ID, type: "supergroup" },
+        from: { id: fromId, is_bot: false, first_name: "Admin" },
+        text,
+        entities: [{ type: "bot_command", offset: 0, length: commandLength }],
+        message_thread_id: threadId,
+      },
+    } as any;
+  }
+
+  function memberLinkUpdate(threadId: number) {
+    return {
+      update_id: 61,
+      message: {
+        message_id: MSG_ID + 1,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: CHAT_ID, type: "supergroup" },
+        from: { id: MEMBER_ID, is_bot: false, first_name: "Member" },
+        text: "See https://example.com",
+        entities: [{ type: "url", offset: 4, length: 19 }],
+        message_thread_id: threadId,
+      },
+    } as any;
+  }
+
+  function memberPhotoUpdate(threadId: number) {
+    return {
+      update_id: 62,
+      message: {
+        message_id: MSG_ID + 2,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: CHAT_ID, type: "supergroup" },
+        from: { id: MEMBER_ID, is_bot: false, first_name: "Member" },
+        photo: [{ file_id: "abc", file_unique_id: "abc", width: 100, height: 100 }],
+        message_thread_id: threadId,
+      },
+    } as any;
+  }
+
+  it("an admin's /allow_links answers in the thread and lets links through there", async () => {
+    const threadId = newThread();
+    const { bot, stored } = await buildThreadRuleBot();
+
+    await bot.handleUpdate(threadUpdate(ADMIN_ID, "/allow_links", 12, threadId));
+
+    const confirmation = capturedCalls.find((c) => c.method === "sendMessage");
+    expect(confirmation?.body.message_thread_id).toBe(threadId);
+    expect(confirmation?.body.text).toContain("можно постить ссылки");
+    expect(stored.get(`${CHAT_ID}:${threadId}`)).toMatchObject({
+      allow_links: true,
+      allow_media: false,
+    });
+    capturedCalls.length = 0;
+
+    await bot.handleUpdate(memberLinkUpdate(threadId));
+    expect(calledMethods()).not.toContain("copyMessage");
+    expect(calledMethods()).not.toContain("deleteMessage");
+  });
+
+  it("leaves the gates on in every other thread", async () => {
+    const threadId = newThread();
+    const otherThreadId = newThread();
+    const { bot } = await buildThreadRuleBot();
+
+    await bot.handleUpdate(threadUpdate(ADMIN_ID, "/allow_links", 12, threadId));
+    capturedCalls.length = 0;
+
+    await bot.handleUpdate(memberLinkUpdate(otherThreadId));
+
+    expect(calledMethods()).toContain("copyMessage");
+    expect(calledMethods()).toContain("deleteMessage");
+  });
+
+  it("/allow_media lets a photo through, links stay gated", async () => {
+    const threadId = newThread();
+    const { bot } = await buildThreadRuleBot();
+
+    await bot.handleUpdate(threadUpdate(ADMIN_ID, "/allow_media", 12, threadId));
+    capturedCalls.length = 0;
+
+    await bot.handleUpdate(memberPhotoUpdate(threadId));
+    expect(calledMethods()).not.toContain("deleteMessage");
+
+    capturedCalls.length = 0;
+    await bot.handleUpdate(memberLinkUpdate(threadId));
+    expect(calledMethods()).toContain("deleteMessage");
+  });
+
+  it("/disallow_links puts the gate back", async () => {
+    const threadId = newThread();
+    const { bot, stored } = await buildThreadRuleBot();
+
+    await bot.handleUpdate(threadUpdate(ADMIN_ID, "/allow_links", 12, threadId));
+    await bot.handleUpdate(threadUpdate(ADMIN_ID, "/disallow_links", 15, threadId));
+    expect(stored.has(`${CHAT_ID}:${threadId}`)).toBe(false);
+    capturedCalls.length = 0;
+
+    await bot.handleUpdate(memberLinkUpdate(threadId));
+    expect(calledMethods()).toContain("deleteMessage");
+  });
+
+  it("explains that the command belongs in a comment thread", async () => {
+    const { bot, stored } = await buildThreadRuleBot();
+
+    await bot.handleUpdate(threadUpdate(ADMIN_ID, "/allow_links", 12));
+
+    const hint = capturedCalls.find((c) => c.method === "sendMessage");
+    expect(hint?.body.text).toBe(NO_THREAD_HINT);
+    expect(stored.size).toBe(0);
+  });
+
+  it("lets the command from a regular member fall through to the other filters", async () => {
+    const threadId = newThread();
+    const { bot, passedThrough } = await buildThreadRuleBot();
+
+    await bot.handleUpdate(threadUpdate(5555, "/allow_links", 12, threadId));
+
+    expect(passedThrough).toHaveBeenCalled();
+    expect(threadAllows(CHAT_ID, threadId, "links")).toBe(false);
   });
 });

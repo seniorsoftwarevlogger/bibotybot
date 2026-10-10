@@ -21,6 +21,7 @@ import { initPromote, rememberUser, setupPromote } from "./src/promote.ts";
 import { setupUnban } from "./src/unban.ts";
 import { setupJoinGate } from "./src/joinGate.ts";
 import { notifyModAction, setupModLog } from "./src/modLog.ts";
+import { initThreadRules, setupThreadRules, threadAllows } from "./src/threadRules.ts";
 import {
   getLevel,
   getRank,
@@ -37,6 +38,7 @@ import {
   isPromoteCommand,
   isStatCommand,
   isTelegramServiceUser,
+  isThreadRuleCommand,
   isUnbanCommand,
   normalizeEditedMessage,
 } from "./src/helpers.ts";
@@ -64,6 +66,10 @@ await mongo.connect();
 // granted by admins via /promote live in our own database from MONGODB_URI.
 initPermissions(mongo.db("achivator_bot"), mongo.db());
 initPromote(mongo.db());
+
+// Thread rules (admins' per-thread "allow links / allow media") are read from
+// memory on every message, so they must be loaded before the bot starts.
+await initThreadRules(mongo.db());
 
 // Store Jev shadow-mode comparisons for offline evaluation. Defaults to the
 // database from MONGODB_URI, the only one this user is allowed to write to.
@@ -180,7 +186,8 @@ bot.use(async (ctx, next) => {
     (isMe(ctx, myChannels) || family) &&
     !isStatCommand(ctx) &&
     !isPromoteCommand(ctx) &&
-    !isUnbanCommand(ctx)
+    !isUnbanCommand(ctx) &&
+    !isThreadRuleCommand(ctx)
   )
     return; // stop processing
 
@@ -200,6 +207,7 @@ bot.use(async (ctx, next) => {
 // Before the channel-post filter, so admins can /promote and /unban while posting as the channel.
 setupPromote(bot, { myChannels, applyRankTag });
 setupUnban(bot, { myChannels });
+setupThreadRules(bot, { myChannels });
 setupModLog(bot, { myChannels });
 
 // Join gate needs to register early: its message middleware must run before
@@ -222,6 +230,8 @@ bot.use(async (ctx, next) => {
 bot.use(async (ctx, next) => {
   if (!ctx.message || !("external_reply" in ctx.message)) return next();
   if (isOwnChannelExternalReply(ctx, myChannels)) return next();
+  if (threadAllows(ctx.chat.id, ctx.message.message_thread_id, "links"))
+    return next();
 
   deleteMessage(ctx, "Сообщение с внешней ссылкой удалено.");
 });
@@ -295,6 +305,8 @@ bot.on(message("text"), async (ctx, next) => {
   // Boosted users and users who earned enough messages can post links
   if (ctx.state?.boosted) return next();
   if (ctx.state?.level?.canLink) return next();
+  if (threadAllows(ctx.chat.id, ctx.message.message_thread_id, "links"))
+    return next();
 
   const messageCount = ctx.state?.level?.messageCount ?? 0;
   if (messageCount >= THRESHOLDS.react) {
@@ -651,6 +663,7 @@ bot.on(
   async (ctx) => {
     if (ctx.state?.boosted) return;
     if (ctx.state?.level?.canMedia) return;
+    if (threadAllows(ctx.chat.id, ctx.message.message_thread_id, "media")) return;
 
     const messageCount = ctx.state?.level?.messageCount ?? 0;
     if (messageCount >= THRESHOLDS.react) {
@@ -680,6 +693,10 @@ await bot.telegram
       { command: "stat", description: "show user stats" },
       { command: "promote", description: "назначить уровень: /promote @username" },
       { command: "unban", description: "снять бан или ограничения: /unban @username" },
+      { command: "allow_links", description: "разрешить ссылки в этом треде" },
+      { command: "allow_media", description: "разрешить медиа в этом треде" },
+      { command: "disallow_links", description: "вернуть проверки ссылок в этом треде" },
+      { command: "disallow_media", description: "вернуть проверки медиа в этом треде" },
     ],
     { scope: { type: "all_chat_administrators" } }
   )

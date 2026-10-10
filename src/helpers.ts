@@ -14,6 +14,12 @@ export function isUnbanCommand(ctx: { message?: { text?: string } }): boolean {
   return /^\/unban(?:@\w+)?(?:\s|$)/.test(ctx.message?.text ?? "");
 }
 
+export function isThreadRuleCommand(ctx: { message?: { text?: string } }): boolean {
+  return /^\/(?:dis)?allow_(?:links|media)(?:@\w+)?(?:\s|$)/.test(
+    ctx.message?.text ?? ""
+  );
+}
+
 export function boostCacheKey(channelId: number | string, userId: number | string): string {
   return `${channelId}:${userId}`;
 }

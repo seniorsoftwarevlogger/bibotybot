@@ -7,6 +7,7 @@ import {
   isOwnChannelExternalReply,
   isStatCommand,
   isTelegramServiceUser,
+  isThreadRuleCommand,
   normalizeEditedMessage,
 } from "../../src/helpers.ts";
 
@@ -38,6 +39,30 @@ describe("isStatCommand", () => {
     expect(isStatCommand({ message: { text: "hello" } })).toBe(false);
     expect(isStatCommand({ message: { text: "/ban" } })).toBe(false);
     expect(isStatCommand({ message: {} })).toBe(false);
+  });
+});
+
+describe("isThreadRuleCommand", () => {
+  it("matches the thread allow/disallow commands", () => {
+    for (const command of [
+      "/allow_links",
+      "/allow_media",
+      "/disallow_links",
+      "/disallow_media",
+    ]) {
+      expect(isThreadRuleCommand({ message: { text: command } })).toBe(true);
+      expect(
+        isThreadRuleCommand({ message: { text: `${command}@bibotybot` } })
+      ).toBe(true);
+    }
+  });
+
+  it("does not match other commands or text", () => {
+    expect(isThreadRuleCommand({ message: { text: "/allow" } })).toBe(false);
+    expect(isThreadRuleCommand({ message: { text: "/allow_links_now" } })).toBe(false);
+    expect(isThreadRuleCommand({ message: { text: "/unban" } })).toBe(false);
+    expect(isThreadRuleCommand({ message: { text: "allow links" } })).toBe(false);
+    expect(isThreadRuleCommand({ message: {} })).toBe(false);
   });
 });
 
