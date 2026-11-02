@@ -35,6 +35,8 @@ import { normalizeEditedMessage } from "../../src/helpers.ts";
 import { initPromote, rememberUser, setupPromote } from "../../src/promote.ts";
 import { setupUnban } from "../../src/unban.ts";
 import { setupJoinGate } from "../../src/joinGate.ts";
+import { setupHelp } from "../../src/help.ts";
+import { initUnlocks, setupUnlocks } from "../../src/unlocks.ts";
 import { notifyModAction, setupModLog } from "../../src/modLog.ts";
 import {
   initThreadRules,
@@ -1361,5 +1363,282 @@ describe("thread rules", () => {
 
     expect(passedThrough).toHaveBeenCalled();
     expect(threadAllows(CHAT_ID, threadId, "links")).toBe(false);
+  });
+});
+
+// ── Help ──────────────────────────────────────────────────────────────────────
+
+describe("help", () => {
+  const MEMBER_ID = 9501;
+
+  function buildHelpBot() {
+    const bot = new Telegraf(TOKEN);
+    bot.botInfo = { id: 1, is_bot: true, first_name: "Bot", username: "bibotybot" } as any;
+    // Mirrors index.ts: edits are aliased into update.message up front.
+    bot.use((ctx, next) => {
+      normalizeEditedMessage(ctx);
+      return next();
+    });
+    setupHelp(bot);
+    const passedThrough = vi.fn();
+    bot.use(passedThrough);
+    return { bot, passedThrough };
+  }
+
+  // Telegraf's command middleware only matches when Telegram marked the text
+  // with a bot_command entity at offset 0.
+  function commandUpdate(
+    fromId: number,
+    text: string,
+    extra: Record<string, unknown> = {}
+  ) {
+    return {
+      update_id: 70,
+      message: {
+        message_id: MSG_ID,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: CHAT_ID, type: "supergroup", title: "Test Chat" },
+        from: { id: fromId, is_bot: false, first_name: "Member" },
+        text,
+        entities: [{ type: "bot_command", offset: 0, length: text.length }],
+        ...extra,
+      },
+    } as any;
+  }
+
+  function privateUpdate(fromId: number, text: string) {
+    return {
+      update_id: 71,
+      message: {
+        message_id: MSG_ID,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: fromId, type: "private" },
+        from: { id: fromId, is_bot: false, first_name: "Member" },
+        text,
+        entities: text.startsWith("/")
+          ? [{ type: "bot_command", offset: 0, length: text.length }]
+          : undefined,
+      },
+    } as any;
+  }
+
+  function plainUpdate(fromId: number, text: string) {
+    return {
+      update_id: 72,
+      message: {
+        message_id: MSG_ID,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: CHAT_ID, type: "supergroup", title: "Test Chat" },
+        from: { id: fromId, is_bot: false, first_name: "Member" },
+        text,
+      },
+    } as any;
+  }
+
+  it("/rules answers in the thread the command came from and drops the command", async () => {
+    const { bot } = buildHelpBot();
+
+    await bot.handleUpdate(
+      commandUpdate(MEMBER_ID, "/rules", { message_thread_id: 4242 })
+    );
+
+    const reply = capturedCalls.find((c) => c.method === "sendMessage");
+    expect(reply?.body.chat_id).toBe(CHAT_ID);
+    expect(reply?.body.message_thread_id).toBe(4242);
+    expect(reply?.body.text).toContain("Правила чата «Test Chat»");
+    expect(reply?.body.text).toContain(`после ${THRESHOLDS.link} сообщений`);
+    expect(reply?.body.text).toContain("@ssv_purge");
+
+    const del = capturedCalls.find((c) => c.method === "deleteMessage");
+    expect(del?.body.message_id).toBe(MSG_ID);
+  });
+
+  it("/help lists the member-facing commands", async () => {
+    const { bot } = buildHelpBot();
+
+    await bot.handleUpdate(commandUpdate(MEMBER_ID + 1, "/help"));
+
+    const reply = capturedCalls.find((c) => c.method === "sendMessage");
+    expect(reply?.body.text).toContain("/rules");
+    expect(reply?.body.text).toContain("/stat");
+    expect(reply?.body.text).toContain("Я не бот");
+  });
+
+  it("a private message gets the help text instead of a JSON dump", async () => {
+    const { bot } = buildHelpBot();
+
+    await bot.handleUpdate(privateUpdate(MEMBER_ID + 2, "привет, ты кто?"));
+
+    const reply = capturedCalls.find((c) => c.method === "sendMessage");
+    expect(reply?.body.text).not.toContain("Debug info");
+    expect(reply?.body.text).toContain("Команды:");
+    expect(calledMethods()).not.toContain("deleteMessage");
+  });
+
+  it("/rules in a private chat answers without a chat title", async () => {
+    const { bot } = buildHelpBot();
+
+    await bot.handleUpdate(privateUpdate(MEMBER_ID + 3, "/rules"));
+
+    const reply = capturedCalls.find((c) => c.method === "sendMessage");
+    expect(reply?.body.text).toContain("Правила чата:");
+    expect(reply?.body.text).not.toContain("«");
+  });
+
+  it("does not answer an edited private message", async () => {
+    const { bot, passedThrough } = buildHelpBot();
+
+    await bot.handleUpdate({
+      update_id: 73,
+      edited_message: {
+        message_id: MSG_ID,
+        date: Math.floor(Date.now() / 1000) - 60,
+        edit_date: Math.floor(Date.now() / 1000),
+        chat: { id: MEMBER_ID + 5, type: "private" },
+        from: { id: MEMBER_ID + 5, is_bot: false, first_name: "Member" },
+        text: "fixed a typo",
+      },
+    } as any);
+
+    expect(passedThrough).toHaveBeenCalled();
+    expect(calledMethods()).not.toContain("sendMessage");
+  });
+
+  it("does not answer a callback from a private chat", async () => {
+    const { bot, passedThrough } = buildHelpBot();
+
+    await bot.handleUpdate({
+      update_id: 74,
+      callback_query: {
+        id: "cb9",
+        from: { id: MEMBER_ID + 6, is_bot: false, first_name: "Member" },
+        chat_instance: "1",
+        data: "whatever",
+        message: {
+          message_id: MSG_ID,
+          date: 0,
+          chat: { id: MEMBER_ID + 6, type: "private" },
+          text: "old",
+        },
+      },
+    } as any);
+
+    expect(passedThrough).toHaveBeenCalled();
+    expect(calledMethods()).not.toContain("sendMessage");
+  });
+
+  it("lets a regular group message through to the other filters", async () => {
+    const { bot, passedThrough } = buildHelpBot();
+
+    await bot.handleUpdate(plainUpdate(MEMBER_ID + 4, "hello"));
+
+    expect(passedThrough).toHaveBeenCalled();
+    expect(calledMethods()).not.toContain("sendMessage");
+    expect(calledMethods()).not.toContain("deleteMessage");
+  });
+});
+
+// ── Unlock notices ────────────────────────────────────────────────────────────
+
+describe("unlock notices", () => {
+  const MEMBER_ID = 9601;
+
+  // The announced set is module state that outlives a test, so every test uses
+  // its own member id.
+  function buildUnlocksBot(messageCount: number, db: Db) {
+    initPermissions(makeDbStub(messageCount));
+    initUnlocks(db);
+
+    const bot = new Telegraf(TOKEN);
+    bot.botInfo = { id: 1, is_bot: true, first_name: "Bot", username: "bibotybot" } as any;
+
+    // Mirrors index.ts: the level middleware fills ctx.state.level, the unlock
+    // notice reads it.
+    bot.use(async (ctx, next) => {
+      const id = ctx.message?.from?.id;
+      if (id && ctx.chat && ctx.message) {
+        ctx.state = {
+          ...ctx.state,
+          level: await getLevel(ctx.chat.id, id),
+          boosted: false,
+        };
+      }
+      return next();
+    });
+    setupUnlocks(bot);
+    return bot;
+  }
+
+  function makeUnlocksDb(existing?: string[]) {
+    const collection = {
+      findOne: vi
+        .fn()
+        .mockResolvedValue(existing ? { unlocked: existing } : null),
+      updateOne: vi.fn().mockResolvedValue({}),
+    };
+    return {
+      db: { collection: () => collection } as unknown as Db,
+      collection,
+    };
+  }
+
+  function textFrom(userId: number) {
+    return {
+      update_id: 80,
+      message: {
+        message_id: MSG_ID,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: CHAT_ID, type: "supergroup", title: "Test Chat" },
+        from: { id: userId, is_bot: false, first_name: "Member" },
+        text: "hello",
+      },
+    } as any;
+  }
+
+  it("tells a member privately what their messages unlocked", async () => {
+    const { db, collection } = makeUnlocksDb();
+    const bot = buildUnlocksBot(THRESHOLDS.link, db);
+
+    await bot.handleUpdate(textFrom(MEMBER_ID));
+
+    const notice = capturedCalls.find((c) => c.method === "sendMessage");
+    expect(notice?.body.chat_id).toBe(CHAT_ID);
+    expect(notice?.body.receiver_user_id).toBe(MEMBER_ID);
+    expect(notice?.body.text).toContain("ссылки");
+    expect(notice?.body.text).toContain("реакции");
+    expect(notice?.body.text).not.toContain("фото и видео");
+    expect(notice?.body.text).toContain("/rules");
+    expect(collection.updateOne).toHaveBeenCalled();
+  });
+
+  it("says nothing to a member below every threshold", async () => {
+    const { db, collection } = makeUnlocksDb();
+    const bot = buildUnlocksBot(0, db);
+
+    await bot.handleUpdate(textFrom(MEMBER_ID + 1));
+
+    expect(calledMethods()).not.toContain("sendMessage");
+    expect(collection.findOne).not.toHaveBeenCalled();
+  });
+
+  it("does not repeat an unlock it already announced before a restart", async () => {
+    const { db } = makeUnlocksDb(["react", "link"]);
+    const bot = buildUnlocksBot(THRESHOLDS.link, db);
+
+    await bot.handleUpdate(textFrom(MEMBER_ID + 2));
+
+    expect(calledMethods()).not.toContain("sendMessage");
+  });
+
+  it("announces a later threshold once, and only once", async () => {
+    const { db } = makeUnlocksDb(["react", "link"]);
+    const bot = buildUnlocksBot(THRESHOLDS.media, db);
+
+    await bot.handleUpdate(textFrom(MEMBER_ID + 3));
+    await bot.handleUpdate(textFrom(MEMBER_ID + 3));
+
+    const notices = capturedCalls.filter((c) => c.method === "sendMessage");
+    expect(notices).toHaveLength(1);
+    expect(notices[0].body.text).toContain("фото и видео");
   });
 });

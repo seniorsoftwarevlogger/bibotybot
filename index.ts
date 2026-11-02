@@ -20,9 +20,12 @@ import { initSpamShadow, logSpamShadow } from "./src/spamShadow.ts";
 import { initPromote, rememberUser, setupPromote } from "./src/promote.ts";
 import { setupUnban } from "./src/unban.ts";
 import { setupJoinGate } from "./src/joinGate.ts";
+import { setupHelp } from "./src/help.ts";
+import { initUnlocks, setupUnlocks } from "./src/unlocks.ts";
 import { notifyModAction, setupModLog } from "./src/modLog.ts";
 import { initThreadRules, setupThreadRules, threadAllows } from "./src/threadRules.ts";
 import {
+  EMOJI_LIMIT,
   getLevel,
   getRank,
   initPermissions,
@@ -71,6 +74,10 @@ initPromote(mongo.db());
 // memory on every message, so they must be loaded before the bot starts.
 await initThreadRules(mongo.db());
 
+// Records which capability unlocks were already announced, so a restart never
+// re-announces them.
+initUnlocks(mongo.db());
+
 // Store Jev shadow-mode comparisons for offline evaluation. Defaults to the
 // database from MONGODB_URI, the only one this user is allowed to write to.
 initSpamShadow(mongo.db(process.env.JEV_SHADOW_DB));
@@ -116,19 +123,12 @@ bot.use((ctx, next) => {
   return next();
 });
 
-// After bot.catch and before other middleware
-bot.use(async (ctx, next) => {
-  // Check if it's a private/direct message
-  if (ctx.chat?.type === "private") {
-    await ctx.reply(
-      `Debug info:\n\`\`\`json\n${JSON.stringify(ctx.update, null, 2)}\`\`\``,
-      {
-        parse_mode: "Markdown",
-      }
-    );
-  }
-  return next();
-});
+// The bot's front door: /rules, /help, and private chats. Registered before
+// the level middleware so the commands reach everyone — including the family
+// and messages posted as the channel, which that middleware stops — and before
+// the moderation gates, which have nothing to do with a command or with a
+// private conversation.
+setupHelp(bot);
 
 const myChannels = ME.split(",");
 let FAMILY = await mongo
@@ -214,6 +214,11 @@ setupModLog(bot, { myChannels });
 // the content gates below (links, spam, media), and its chat_member handler
 // before the ban-replication handler further down, which doesn't call next().
 setupJoinGate(bot, { myChannels, family: () => FAMILY });
+
+// Announces newly unlocked capabilities (reactions, links, media). Reads
+// ctx.state.level, so it must come after the level middleware; sitting after
+// the join gate means a message the captcha is holding announces nothing.
+setupUnlocks(bot);
 
 bot.use(async (ctx, next) => {
   console.debug("isChannelBot", isChannelBot(ctx));
@@ -335,7 +340,6 @@ async function isSpam(text: string): Promise<boolean> {
 
 // Emoji-flood strikes: the first hit is soft (rules message + a minute without
 // reactions), a repeat within the window falls back to the full block.
-const EMOJI_LIMIT = 5;
 const EMOJI_REACTION_RESTRICTION_MS = 60 * 1000;
 const EMOJI_STRIKE_WINDOW_MS = 60 * 60 * 1000;
 const emojiStrikes = new Map<string, number>();
@@ -685,12 +689,18 @@ const launchOptions =
     : { polling: { timeout: 30, limit: 10 } };
 
 await bot.telegram
-  .setMyCommands([{ command: "stat", description: "show user stats" }])
+  .setMyCommands([
+    { command: "rules", description: "правила чата" },
+    { command: "stat", description: "статистика и уровень" },
+    { command: "help", description: "что умеет бот" },
+  ])
   .catch((error) => console.error("Failed to set bot commands:", error));
 await bot.telegram
   .setMyCommands(
     [
+      { command: "rules", description: "правила чата" },
       { command: "stat", description: "show user stats" },
+      { command: "help", description: "что умеет бот" },
       { command: "promote", description: "назначить уровень: /promote @username" },
       { command: "unban", description: "снять бан или ограничения: /unban @username" },
       { command: "allow_links", description: "разрешить ссылки в этом треде" },

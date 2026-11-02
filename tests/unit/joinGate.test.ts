@@ -4,6 +4,7 @@ import {
   joinEvent,
   parseJoinGateCallback,
 } from "../../src/joinGate.ts";
+import { rulesList } from "../../src/help.ts";
 import { THRESHOLDS } from "../../src/permissions.ts";
 
 describe("joinEvent", () => {
@@ -49,6 +50,8 @@ describe("captchaText", () => {
     expect(text).toContain(`после ${THRESHOLDS.link} сообщений`);
     expect(text).toContain(`после ${THRESHOLDS.media} сообщений`);
     expect(text).toContain("5 кастомных эмодзи");
+    expect(text).toContain("/rules");
+    expect(text).toContain(rulesList()[0]);
   });
 
   it("greets without a title", () => {

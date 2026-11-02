@@ -1,4 +1,5 @@
 import type { Telegraf } from "telegraf";
+import { rulesList } from "./help.ts";
 import { blockUserUntil, deleteMessage, unbanUser } from "./lib.ts";
 import { THRESHOLDS } from "./permissions.ts";
 import { isAdmin } from "./promote.ts";
@@ -90,11 +91,8 @@ export function captchaText(chatTitle: string | undefined): string {
     "",
     "Ваше сообщение удалено и сохранено в карантине: сначала подтвердите, что вы не бот — нажмите кнопку ниже.",
     "",
-    "Правила чата:",
-    `• реакции — после ${THRESHOLDS.react} сообщений;`,
-    `• ссылки — после ${THRESHOLDS.link} сообщений или за буст канала;`,
-    `• медиа — после ${THRESHOLDS.media} сообщений;`,
-    "• не больше 5 кастомных эмодзи в одном сообщении.",
+    "Правила чата (полный список: /rules):",
+    ...rulesList(),
   ].join("\n");
 }
 
