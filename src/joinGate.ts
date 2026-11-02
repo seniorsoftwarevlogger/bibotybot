@@ -160,11 +160,16 @@ export function setupJoinGate(
   {
     myChannels,
     family,
+    spamCheck,
     freshJoinWindowMs = DEFAULT_FRESH_JOIN_WINDOW_MS,
     restrictionTtlMs = DEFAULT_RESTRICTION_TTL_MS,
   }: {
     myChannels: string[];
     family: () => string[];
+    // Returns true when the message was spam and has already been removed and
+    // its sender blocked. A captcha banner for such a message would hang in the
+    // thread with nobody able to press it.
+    spamCheck?: (ctx) => Promise<boolean>;
     freshJoinWindowMs?: number;
     restrictionTtlMs?: number;
   }
@@ -208,6 +213,10 @@ export function setupJoinGate(
     if (!isFreshJoiner(chatId, userId, freshJoinWindowMs)) return next();
     if (ctx.state?.boosted) return next();
     if ((ctx.state?.level?.messageCount ?? 0) >= THRESHOLDS.react) return next();
+
+    // Spam wins over the welcome gate: the spam check removes the message and
+    // blocks the sender, so a captcha would only hang in the thread unanswered.
+    if (spamCheck && message.text && (await spamCheck(ctx))) return;
 
     await startCaptcha(ctx, restrictionTtlMs);
   });

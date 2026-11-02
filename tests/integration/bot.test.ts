@@ -677,6 +677,7 @@ describe("join gate", () => {
       boosted?: boolean;
       freshJoinWindowMs?: number;
       restrictionTtlMs?: number;
+      spam?: boolean;
     } = {}
   ) {
     initPermissions(makeDbStub(messageCount));
@@ -694,9 +695,21 @@ describe("join gate", () => {
       return next();
     });
 
+    // Mirror of handleSpam from index.ts: removes the message and blocks the
+    // sender, and reports back whether it did.
+    const spamCheck = async (ctx) => {
+      if (!opts.spam) return false;
+      await blockUser(ctx.telegram, ctx.chat.id, ctx.message.from.id).catch(
+        () => {}
+      );
+      await deleteMessage(ctx, "Сообщение похожее на спам было удалено.");
+      return true;
+    };
+
     setupJoinGate(bot, {
       myChannels: [],
       family: () => family,
+      spamCheck,
       freshJoinWindowMs: opts.freshJoinWindowMs,
       restrictionTtlMs: opts.restrictionTtlMs,
     });
@@ -832,6 +845,39 @@ describe("join gate", () => {
     expect(restrict?.body.until_date).toBeGreaterThan(
       Math.floor(Date.now() / 1000)
     );
+  });
+
+  it("a spam first message is removed as spam, with no captcha published", async () => {
+    const userId = NEW_USER_ID + 14;
+    const bot = buildJoinGateBot(0, [], { spam: true });
+
+    await bot.handleUpdate(joinUpdate(userId));
+    await bot.handleUpdate(textUpdate(userId, MSG_ID));
+
+    // No join-gate button was published anywhere — the mod log block notice is
+    // also a sendMessage with a keyboard, so match on the callback data.
+    const gateButtons = capturedCalls
+      .filter((c) => c.method === "sendMessage" && c.body.reply_markup)
+      .flatMap((c) => (c.body.reply_markup as any).inline_keyboard.flat())
+      .filter((b: any) => String(b.callback_data ?? "").startsWith("joingate:"));
+    expect(gateButtons).toEqual([]);
+
+    // …the message is quarantined and deleted, and the sender is blocked
+    // outright rather than held behind a self-expiring captcha restriction.
+    const copy = capturedCalls.find((c) => c.method === "copyMessage");
+    expect(copy?.body.chat_id).toBe("@ssv_purge");
+    expect(copy?.body.message_id).toBe(MSG_ID);
+    expect(calledMethods()).toContain("deleteMessage");
+    const restrict = capturedCalls.find((c) => c.method === "restrictChatMember");
+    expect(restrict?.body.user_id).toBe(userId);
+    expect(restrict?.body.permissions.can_send_messages).toBe(false);
+    expect(restrict?.body.until_date).toBeUndefined();
+
+    // The only thing the member sees is the ephemeral spam notice.
+    const notice = capturedCalls.find(
+      (c) => c.method === "sendMessage" && c.body.receiver_user_id === userId
+    );
+    expect(notice?.body.text).toContain("спам");
   });
 
   it("holds a second message silently while the captcha is unanswered", async () => {

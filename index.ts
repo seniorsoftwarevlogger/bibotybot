@@ -211,9 +211,15 @@ setupThreadRules(bot, { myChannels });
 setupModLog(bot, { myChannels });
 
 // Join gate needs to register early: its message middleware must run before
-// the content gates below (links, spam, media), and its chat_member handler
-// before the ban-replication handler further down, which doesn't call next().
-setupJoinGate(bot, { myChannels, family: () => FAMILY });
+// the content gates below (links, media), and its chat_member handler before
+// the ban-replication handler further down, which doesn't call next(). It gets
+// the spam decision directly, since a spam first message must be removed and
+// blocked rather than answered with a captcha banner.
+setupJoinGate(bot, {
+  myChannels,
+  family: () => FAMILY,
+  spamCheck: handleSpam,
+});
 
 // Announces newly unlocked capabilities (reactions, links, media). Reads
 // ctx.state.level, so it must come after the level middleware; sitting after
@@ -401,12 +407,12 @@ bot.on(message("text"), async (ctx, next) => {
   }
 });
 
-// Update the middleware for spam filtering
-bot.on(message("text"), async (ctx, next) => {
-  if (goodCitizens.has(ctx.message.from.id.toString())) {
-    // check if the bloom filter has the user id, means that the user posted a message that was classified as not spam
-    return next();
-  }
+// Shared with the join gate, which must not publish a welcome captcha for a
+// message that is about to be removed as spam. Returns true when the message
+// was spam and has been dealt with.
+async function handleSpam(ctx): Promise<boolean> {
+  // The bloom filter holds the users whose message was classified as not spam.
+  if (goodCitizens.has(ctx.message.from.id.toString())) return false;
 
   const spam = await isSpam(ctx.message.text);
 
@@ -421,34 +427,19 @@ bot.on(message("text"), async (ctx, next) => {
 
   if (!spam) {
     goodCitizens.add(ctx.message.from.id.toString());
-
-    return next();
+    return false;
   }
-  blockUser(ctx.telegram, ctx.chat.id, ctx.message.from.id).catch((error) => {
+
+  await blockUser(ctx.telegram, ctx.chat.id, ctx.message.from.id).catch((error) => {
     console.error("Error blocking user:", error);
   });
-  deleteMessage(ctx, "Сообщение похожее на спам было удалено.");
+  await deleteMessage(ctx, "Сообщение похожее на спам было удалено.");
+  return true;
+}
 
-  return;
-
-  await ctx.reply(
-    "Это сообщение похоже на спам. Если это спам, нажмите кнопку, чтобы удалить его даже если вы не админ.",
-    {
-      reply_parameters: {
-        message_id: ctx.message.message_id,
-      },
-      reply_markup: {
-        inline_keyboard: [
-          [
-            {
-              text: "Голос за удаление",
-              callback_data: `del:${ctx.message.message_id}:${ctx.chat.id}:${ctx.from.id}:`,
-            },
-          ],
-        ],
-      },
-    }
-  );
+bot.on(message("text"), async (ctx, next) => {
+  if (await handleSpam(ctx)) return;
+  return next();
 });
 
 // Handle the delete button callback
