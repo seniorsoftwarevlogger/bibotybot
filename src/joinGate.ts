@@ -1,4 +1,5 @@
 import type { Telegraf } from "telegraf";
+import { rulesList } from "./help.ts";
 import { blockUserUntil, deleteMessage, unbanUser } from "./lib.ts";
 import { THRESHOLDS } from "./permissions.ts";
 import { isAdmin } from "./promote.ts";
@@ -90,11 +91,8 @@ export function captchaText(chatTitle: string | undefined): string {
     "",
     "Ваше сообщение удалено и сохранено в карантине: сначала подтвердите, что вы не бот — нажмите кнопку ниже.",
     "",
-    "Правила чата:",
-    `• реакции — после ${THRESHOLDS.react} сообщений;`,
-    `• ссылки — после ${THRESHOLDS.link} сообщений или за буст канала;`,
-    `• медиа — после ${THRESHOLDS.media} сообщений;`,
-    "• не больше 5 кастомных эмодзи в одном сообщении.",
+    "Правила чата (полный список: /rules):",
+    ...rulesList(),
   ].join("\n");
 }
 
@@ -162,11 +160,16 @@ export function setupJoinGate(
   {
     myChannels,
     family,
+    spamCheck,
     freshJoinWindowMs = DEFAULT_FRESH_JOIN_WINDOW_MS,
     restrictionTtlMs = DEFAULT_RESTRICTION_TTL_MS,
   }: {
     myChannels: string[];
     family: () => string[];
+    // Returns true when the message was spam and has already been removed and
+    // its sender blocked. A captcha banner for such a message would hang in the
+    // thread with nobody able to press it.
+    spamCheck?: (ctx) => Promise<boolean>;
     freshJoinWindowMs?: number;
     restrictionTtlMs?: number;
   }
@@ -202,7 +205,10 @@ export function setupJoinGate(
     const activeCaptcha = pending.get(key);
     if (activeCaptcha && activeCaptcha.expiresAt > Date.now()) {
       // An unanswered captcha already sits in the thread — hold this message
-      // too, without another reply.
+      // too, without another reply. A member who can still post here usually
+      // means the restriction never landed, so the spam check has to run:
+      // quarantining spam silently would leave the sender unblocked.
+      if (spamCheck && message.text && (await spamCheck(ctx))) return;
       await deleteMessage(ctx, null, { mute: false });
       return;
     }
@@ -210,6 +216,10 @@ export function setupJoinGate(
     if (!isFreshJoiner(chatId, userId, freshJoinWindowMs)) return next();
     if (ctx.state?.boosted) return next();
     if ((ctx.state?.level?.messageCount ?? 0) >= THRESHOLDS.react) return next();
+
+    // Spam wins over the welcome gate: the spam check removes the message and
+    // blocks the sender, so a captcha would only hang in the thread unanswered.
+    if (spamCheck && message.text && (await spamCheck(ctx))) return;
 
     await startCaptcha(ctx, restrictionTtlMs);
   });

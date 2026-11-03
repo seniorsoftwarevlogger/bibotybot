@@ -35,6 +35,8 @@ import { normalizeEditedMessage } from "../../src/helpers.ts";
 import { initPromote, rememberUser, setupPromote } from "../../src/promote.ts";
 import { setupUnban } from "../../src/unban.ts";
 import { setupJoinGate } from "../../src/joinGate.ts";
+import { setupHelp } from "../../src/help.ts";
+import { initUnlocks, setupUnlocks } from "../../src/unlocks.ts";
 import { notifyModAction, setupModLog } from "../../src/modLog.ts";
 import {
   initThreadRules,
@@ -675,6 +677,7 @@ describe("join gate", () => {
       boosted?: boolean;
       freshJoinWindowMs?: number;
       restrictionTtlMs?: number;
+      spam?: boolean | ((ctx: any) => boolean);
     } = {}
   ) {
     initPermissions(makeDbStub(messageCount));
@@ -692,9 +695,23 @@ describe("join gate", () => {
       return next();
     });
 
+    // Mirror of handleSpam from index.ts: removes the message and blocks the
+    // sender, and reports back whether it did.
+    const spamCheck = async (ctx) => {
+      const spam =
+        typeof opts.spam === "function" ? opts.spam(ctx) : Boolean(opts.spam);
+      if (!spam) return false;
+      await blockUser(ctx.telegram, ctx.chat.id, ctx.message.from.id).catch(
+        () => {}
+      );
+      await deleteMessage(ctx, "Сообщение похожее на спам было удалено.");
+      return true;
+    };
+
     setupJoinGate(bot, {
       myChannels: [],
       family: () => family,
+      spamCheck,
       freshJoinWindowMs: opts.freshJoinWindowMs,
       restrictionTtlMs: opts.restrictionTtlMs,
     });
@@ -832,6 +849,39 @@ describe("join gate", () => {
     );
   });
 
+  it("a spam first message is removed as spam, with no captcha published", async () => {
+    const userId = NEW_USER_ID + 14;
+    const bot = buildJoinGateBot(0, [], { spam: true });
+
+    await bot.handleUpdate(joinUpdate(userId));
+    await bot.handleUpdate(textUpdate(userId, MSG_ID));
+
+    // No join-gate button was published anywhere — the mod log block notice is
+    // also a sendMessage with a keyboard, so match on the callback data.
+    const gateButtons = capturedCalls
+      .filter((c) => c.method === "sendMessage" && c.body.reply_markup)
+      .flatMap((c) => (c.body.reply_markup as any).inline_keyboard.flat())
+      .filter((b: any) => String(b.callback_data ?? "").startsWith("joingate:"));
+    expect(gateButtons).toEqual([]);
+
+    // …the message is quarantined and deleted, and the sender is blocked
+    // outright rather than held behind a self-expiring captcha restriction.
+    const copy = capturedCalls.find((c) => c.method === "copyMessage");
+    expect(copy?.body.chat_id).toBe("@ssv_purge");
+    expect(copy?.body.message_id).toBe(MSG_ID);
+    expect(calledMethods()).toContain("deleteMessage");
+    const restrict = capturedCalls.find((c) => c.method === "restrictChatMember");
+    expect(restrict?.body.user_id).toBe(userId);
+    expect(restrict?.body.permissions.can_send_messages).toBe(false);
+    expect(restrict?.body.until_date).toBeUndefined();
+
+    // The only thing the member sees is the ephemeral spam notice.
+    const notice = capturedCalls.find(
+      (c) => c.method === "sendMessage" && c.body.receiver_user_id === userId
+    );
+    expect(notice?.body.text).toContain("спам");
+  });
+
   it("holds a second message silently while the captcha is unanswered", async () => {
     const userId = NEW_USER_ID + 2;
     const bot = buildJoinGateBot(0);
@@ -847,6 +897,41 @@ describe("join gate", () => {
     const copy = capturedCalls.find((c) => c.method === "copyMessage");
     expect(copy?.body.message_id).toBe(MSG_ID + 1);
     expect(calledMethods()).toContain("deleteMessage");
+  });
+
+  it("spam sent while the captcha is pending blocks the sender", async () => {
+    const userId = NEW_USER_ID + 15;
+    // The greeting is clean so the captcha goes up; the follow-up is spam.
+    const bot = buildJoinGateBot(0, [], {
+      spam: (ctx) => ctx.message.message_id !== MSG_ID,
+    });
+
+    await bot.handleUpdate(joinUpdate(userId));
+    await bot.handleUpdate(textUpdate(userId, MSG_ID));
+    expect(captchaMessage()?.body.reply_parameters?.message_id).toBe(MSG_ID);
+    capturedCalls.length = 0;
+
+    await bot.handleUpdate(textUpdate(userId, MSG_ID + 1));
+
+    const copy = capturedCalls.find((c) => c.method === "copyMessage");
+    expect(copy?.body.message_id).toBe(MSG_ID + 1);
+    expect(calledMethods()).toContain("deleteMessage");
+
+    // Blocked outright and told why, instead of a silent quarantine.
+    const restrict = capturedCalls.find((c) => c.method === "restrictChatMember");
+    expect(restrict?.body.user_id).toBe(userId);
+    expect(restrict?.body.until_date).toBeUndefined();
+    const notice = capturedCalls.find(
+      (c) => c.method === "sendMessage" && c.body.receiver_user_id === userId
+    );
+    expect(notice?.body.text).toContain("спам");
+
+    // And still no second banner in the thread.
+    const gateButtons = capturedCalls
+      .filter((c) => c.method === "sendMessage" && c.body.reply_markup)
+      .flatMap((c) => (c.body.reply_markup as any).inline_keyboard.flat())
+      .filter((b: any) => String(b.callback_data ?? "").startsWith("joingate:"));
+    expect(gateButtons).toEqual([]);
   });
 
   it("passing the captcha restores permissions and lifts the gate", async () => {
@@ -1361,5 +1446,282 @@ describe("thread rules", () => {
 
     expect(passedThrough).toHaveBeenCalled();
     expect(threadAllows(CHAT_ID, threadId, "links")).toBe(false);
+  });
+});
+
+// ── Help ──────────────────────────────────────────────────────────────────────
+
+describe("help", () => {
+  const MEMBER_ID = 9501;
+
+  function buildHelpBot() {
+    const bot = new Telegraf(TOKEN);
+    bot.botInfo = { id: 1, is_bot: true, first_name: "Bot", username: "bibotybot" } as any;
+    // Mirrors index.ts: edits are aliased into update.message up front.
+    bot.use((ctx, next) => {
+      normalizeEditedMessage(ctx);
+      return next();
+    });
+    setupHelp(bot);
+    const passedThrough = vi.fn();
+    bot.use(passedThrough);
+    return { bot, passedThrough };
+  }
+
+  // Telegraf's command middleware only matches when Telegram marked the text
+  // with a bot_command entity at offset 0.
+  function commandUpdate(
+    fromId: number,
+    text: string,
+    extra: Record<string, unknown> = {}
+  ) {
+    return {
+      update_id: 70,
+      message: {
+        message_id: MSG_ID,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: CHAT_ID, type: "supergroup", title: "Test Chat" },
+        from: { id: fromId, is_bot: false, first_name: "Member" },
+        text,
+        entities: [{ type: "bot_command", offset: 0, length: text.length }],
+        ...extra,
+      },
+    } as any;
+  }
+
+  function privateUpdate(fromId: number, text: string) {
+    return {
+      update_id: 71,
+      message: {
+        message_id: MSG_ID,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: fromId, type: "private" },
+        from: { id: fromId, is_bot: false, first_name: "Member" },
+        text,
+        entities: text.startsWith("/")
+          ? [{ type: "bot_command", offset: 0, length: text.length }]
+          : undefined,
+      },
+    } as any;
+  }
+
+  function plainUpdate(fromId: number, text: string) {
+    return {
+      update_id: 72,
+      message: {
+        message_id: MSG_ID,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: CHAT_ID, type: "supergroup", title: "Test Chat" },
+        from: { id: fromId, is_bot: false, first_name: "Member" },
+        text,
+      },
+    } as any;
+  }
+
+  it("/rules answers in the thread the command came from and drops the command", async () => {
+    const { bot } = buildHelpBot();
+
+    await bot.handleUpdate(
+      commandUpdate(MEMBER_ID, "/rules", { message_thread_id: 4242 })
+    );
+
+    const reply = capturedCalls.find((c) => c.method === "sendMessage");
+    expect(reply?.body.chat_id).toBe(CHAT_ID);
+    expect(reply?.body.message_thread_id).toBe(4242);
+    expect(reply?.body.text).toContain("Правила чата «Test Chat»");
+    expect(reply?.body.text).toContain(`после ${THRESHOLDS.link} сообщений`);
+    expect(reply?.body.text).toContain("@ssv_purge");
+
+    const del = capturedCalls.find((c) => c.method === "deleteMessage");
+    expect(del?.body.message_id).toBe(MSG_ID);
+  });
+
+  it("/help lists the member-facing commands", async () => {
+    const { bot } = buildHelpBot();
+
+    await bot.handleUpdate(commandUpdate(MEMBER_ID + 1, "/help"));
+
+    const reply = capturedCalls.find((c) => c.method === "sendMessage");
+    expect(reply?.body.text).toContain("/rules");
+    expect(reply?.body.text).toContain("/stat");
+    expect(reply?.body.text).toContain("Я не бот");
+  });
+
+  it("a private message gets the help text instead of a JSON dump", async () => {
+    const { bot } = buildHelpBot();
+
+    await bot.handleUpdate(privateUpdate(MEMBER_ID + 2, "привет, ты кто?"));
+
+    const reply = capturedCalls.find((c) => c.method === "sendMessage");
+    expect(reply?.body.text).not.toContain("Debug info");
+    expect(reply?.body.text).toContain("Команды:");
+    expect(calledMethods()).not.toContain("deleteMessage");
+  });
+
+  it("/rules in a private chat answers without a chat title", async () => {
+    const { bot } = buildHelpBot();
+
+    await bot.handleUpdate(privateUpdate(MEMBER_ID + 3, "/rules"));
+
+    const reply = capturedCalls.find((c) => c.method === "sendMessage");
+    expect(reply?.body.text).toContain("Правила чата:");
+    expect(reply?.body.text).not.toContain("«");
+  });
+
+  it("does not answer an edited private message", async () => {
+    const { bot, passedThrough } = buildHelpBot();
+
+    await bot.handleUpdate({
+      update_id: 73,
+      edited_message: {
+        message_id: MSG_ID,
+        date: Math.floor(Date.now() / 1000) - 60,
+        edit_date: Math.floor(Date.now() / 1000),
+        chat: { id: MEMBER_ID + 5, type: "private" },
+        from: { id: MEMBER_ID + 5, is_bot: false, first_name: "Member" },
+        text: "fixed a typo",
+      },
+    } as any);
+
+    expect(passedThrough).toHaveBeenCalled();
+    expect(calledMethods()).not.toContain("sendMessage");
+  });
+
+  it("does not answer a callback from a private chat", async () => {
+    const { bot, passedThrough } = buildHelpBot();
+
+    await bot.handleUpdate({
+      update_id: 74,
+      callback_query: {
+        id: "cb9",
+        from: { id: MEMBER_ID + 6, is_bot: false, first_name: "Member" },
+        chat_instance: "1",
+        data: "whatever",
+        message: {
+          message_id: MSG_ID,
+          date: 0,
+          chat: { id: MEMBER_ID + 6, type: "private" },
+          text: "old",
+        },
+      },
+    } as any);
+
+    expect(passedThrough).toHaveBeenCalled();
+    expect(calledMethods()).not.toContain("sendMessage");
+  });
+
+  it("lets a regular group message through to the other filters", async () => {
+    const { bot, passedThrough } = buildHelpBot();
+
+    await bot.handleUpdate(plainUpdate(MEMBER_ID + 4, "hello"));
+
+    expect(passedThrough).toHaveBeenCalled();
+    expect(calledMethods()).not.toContain("sendMessage");
+    expect(calledMethods()).not.toContain("deleteMessage");
+  });
+});
+
+// ── Unlock notices ────────────────────────────────────────────────────────────
+
+describe("unlock notices", () => {
+  const MEMBER_ID = 9601;
+
+  // The announced set is module state that outlives a test, so every test uses
+  // its own member id.
+  function buildUnlocksBot(messageCount: number, db: Db) {
+    initPermissions(makeDbStub(messageCount));
+    initUnlocks(db);
+
+    const bot = new Telegraf(TOKEN);
+    bot.botInfo = { id: 1, is_bot: true, first_name: "Bot", username: "bibotybot" } as any;
+
+    // Mirrors index.ts: the level middleware fills ctx.state.level, the unlock
+    // notice reads it.
+    bot.use(async (ctx, next) => {
+      const id = ctx.message?.from?.id;
+      if (id && ctx.chat && ctx.message) {
+        ctx.state = {
+          ...ctx.state,
+          level: await getLevel(ctx.chat.id, id),
+          boosted: false,
+        };
+      }
+      return next();
+    });
+    setupUnlocks(bot);
+    return bot;
+  }
+
+  function makeUnlocksDb(existing?: string[]) {
+    const collection = {
+      findOne: vi
+        .fn()
+        .mockResolvedValue(existing ? { unlocked: existing } : null),
+      updateOne: vi.fn().mockResolvedValue({}),
+    };
+    return {
+      db: { collection: () => collection } as unknown as Db,
+      collection,
+    };
+  }
+
+  function textFrom(userId: number) {
+    return {
+      update_id: 80,
+      message: {
+        message_id: MSG_ID,
+        date: Math.floor(Date.now() / 1000),
+        chat: { id: CHAT_ID, type: "supergroup", title: "Test Chat" },
+        from: { id: userId, is_bot: false, first_name: "Member" },
+        text: "hello",
+      },
+    } as any;
+  }
+
+  it("tells a member privately what their messages unlocked", async () => {
+    const { db, collection } = makeUnlocksDb();
+    const bot = buildUnlocksBot(THRESHOLDS.link, db);
+
+    await bot.handleUpdate(textFrom(MEMBER_ID));
+
+    const notice = capturedCalls.find((c) => c.method === "sendMessage");
+    expect(notice?.body.chat_id).toBe(CHAT_ID);
+    expect(notice?.body.receiver_user_id).toBe(MEMBER_ID);
+    expect(notice?.body.text).toContain("ссылки");
+    expect(notice?.body.text).toContain("реакции");
+    expect(notice?.body.text).not.toContain("фото и видео");
+    expect(notice?.body.text).toContain("/rules");
+    expect(collection.updateOne).toHaveBeenCalled();
+  });
+
+  it("says nothing to a member below every threshold", async () => {
+    const { db, collection } = makeUnlocksDb();
+    const bot = buildUnlocksBot(0, db);
+
+    await bot.handleUpdate(textFrom(MEMBER_ID + 1));
+
+    expect(calledMethods()).not.toContain("sendMessage");
+    expect(collection.findOne).not.toHaveBeenCalled();
+  });
+
+  it("does not repeat an unlock it already announced before a restart", async () => {
+    const { db } = makeUnlocksDb(["react", "link"]);
+    const bot = buildUnlocksBot(THRESHOLDS.link, db);
+
+    await bot.handleUpdate(textFrom(MEMBER_ID + 2));
+
+    expect(calledMethods()).not.toContain("sendMessage");
+  });
+
+  it("announces a later threshold once, and only once", async () => {
+    const { db } = makeUnlocksDb(["react", "link"]);
+    const bot = buildUnlocksBot(THRESHOLDS.media, db);
+
+    await bot.handleUpdate(textFrom(MEMBER_ID + 3));
+    await bot.handleUpdate(textFrom(MEMBER_ID + 3));
+
+    const notices = capturedCalls.filter((c) => c.method === "sendMessage");
+    expect(notices).toHaveLength(1);
+    expect(notices[0].body.text).toContain("фото и видео");
   });
 });

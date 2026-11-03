@@ -6,6 +6,10 @@ export const THRESHOLDS = {
   media: 50,
 } as const;
 
+// Custom emojis allowed in a single message before the flood gate kicks in.
+// Lives with the thresholds because /rules quotes it to members.
+export const EMOJI_LIMIT = 5;
+
 export const RANKS = [
   { count: 500, tag: "TB" },
   { count: 100, tag: "GB" },
