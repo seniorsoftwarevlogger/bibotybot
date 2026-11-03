@@ -677,7 +677,7 @@ describe("join gate", () => {
       boosted?: boolean;
       freshJoinWindowMs?: number;
       restrictionTtlMs?: number;
-      spam?: boolean;
+      spam?: boolean | ((ctx: any) => boolean);
     } = {}
   ) {
     initPermissions(makeDbStub(messageCount));
@@ -698,7 +698,9 @@ describe("join gate", () => {
     // Mirror of handleSpam from index.ts: removes the message and blocks the
     // sender, and reports back whether it did.
     const spamCheck = async (ctx) => {
-      if (!opts.spam) return false;
+      const spam =
+        typeof opts.spam === "function" ? opts.spam(ctx) : Boolean(opts.spam);
+      if (!spam) return false;
       await blockUser(ctx.telegram, ctx.chat.id, ctx.message.from.id).catch(
         () => {}
       );
@@ -895,6 +897,41 @@ describe("join gate", () => {
     const copy = capturedCalls.find((c) => c.method === "copyMessage");
     expect(copy?.body.message_id).toBe(MSG_ID + 1);
     expect(calledMethods()).toContain("deleteMessage");
+  });
+
+  it("spam sent while the captcha is pending blocks the sender", async () => {
+    const userId = NEW_USER_ID + 15;
+    // The greeting is clean so the captcha goes up; the follow-up is spam.
+    const bot = buildJoinGateBot(0, [], {
+      spam: (ctx) => ctx.message.message_id !== MSG_ID,
+    });
+
+    await bot.handleUpdate(joinUpdate(userId));
+    await bot.handleUpdate(textUpdate(userId, MSG_ID));
+    expect(captchaMessage()?.body.reply_parameters?.message_id).toBe(MSG_ID);
+    capturedCalls.length = 0;
+
+    await bot.handleUpdate(textUpdate(userId, MSG_ID + 1));
+
+    const copy = capturedCalls.find((c) => c.method === "copyMessage");
+    expect(copy?.body.message_id).toBe(MSG_ID + 1);
+    expect(calledMethods()).toContain("deleteMessage");
+
+    // Blocked outright and told why, instead of a silent quarantine.
+    const restrict = capturedCalls.find((c) => c.method === "restrictChatMember");
+    expect(restrict?.body.user_id).toBe(userId);
+    expect(restrict?.body.until_date).toBeUndefined();
+    const notice = capturedCalls.find(
+      (c) => c.method === "sendMessage" && c.body.receiver_user_id === userId
+    );
+    expect(notice?.body.text).toContain("спам");
+
+    // And still no second banner in the thread.
+    const gateButtons = capturedCalls
+      .filter((c) => c.method === "sendMessage" && c.body.reply_markup)
+      .flatMap((c) => (c.body.reply_markup as any).inline_keyboard.flat())
+      .filter((b: any) => String(b.callback_data ?? "").startsWith("joingate:"));
+    expect(gateButtons).toEqual([]);
   });
 
   it("passing the captcha restores permissions and lifts the gate", async () => {

@@ -205,7 +205,10 @@ export function setupJoinGate(
     const activeCaptcha = pending.get(key);
     if (activeCaptcha && activeCaptcha.expiresAt > Date.now()) {
       // An unanswered captcha already sits in the thread — hold this message
-      // too, without another reply.
+      // too, without another reply. A member who can still post here usually
+      // means the restriction never landed, so the spam check has to run:
+      // quarantining spam silently would leave the sender unblocked.
+      if (spamCheck && message.text && (await spamCheck(ctx))) return;
       await deleteMessage(ctx, null, { mute: false });
       return;
     }
