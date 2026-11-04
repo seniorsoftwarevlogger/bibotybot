@@ -121,7 +121,19 @@ export function parseModUnbanCallback(
   return { chatId: Number(match[1]), userId: Number(match[2]) };
 }
 
-export function setupModLog(bot: Telegraf, { myChannels }: { myChannels: string[] }) {
+export function setupModLog(
+  bot: Telegraf,
+  {
+    myChannels,
+    onUnban,
+  }: {
+    myChannels: string[];
+    // An admin's decision overrides the automated one: the profile gate caches
+    // its "bot" verdict, so without this the member's next message would be
+    // blocked again a second after the button was pressed.
+    onUnban?: (chatId: number, userId: number, adminId: number) => void | Promise<void>;
+  }
+) {
   bot.action(new RegExp(`^${MOD_UNBAN_PREFIX}:`), async (ctx) => {
     if (!ctx.callbackQuery || !("data" in ctx.callbackQuery)) return;
     const parsed = parseModUnbanCallback(ctx.callbackQuery.data);
@@ -145,6 +157,8 @@ export function setupModLog(bot: Telegraf, { myChannels }: { myChannels: string[
       await ctx.answerCbQuery("Не удалось снять ограничения.", { show_alert: true });
       return;
     }
+
+    await onUnban?.(chatId, userId, clicker.id);
 
     const who = clicker.username ? `@${clicker.username}` : clicker.first_name;
     const base =

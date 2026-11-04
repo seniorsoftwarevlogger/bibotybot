@@ -22,6 +22,11 @@ import { setupHelp } from "./src/help.ts";
 import { initUnlocks, setupUnlocks } from "./src/unlocks.ts";
 import { setupModLog } from "./src/modLog.ts";
 import { setupReactionGate } from "./src/reactionGate.ts";
+import {
+  clearAccount,
+  initProfileGate,
+  setupProfileGate,
+} from "./src/profileGate.ts";
 import { initThreadRules, setupThreadRules, threadAllows } from "./src/threadRules.ts";
 import {
   EMOJI_LIMIT,
@@ -76,6 +81,11 @@ await initThreadRules(mongo.db());
 // Records which capability unlocks were already announced, so a restart never
 // re-announces them.
 initUnlocks(mongo.db());
+
+// Verdicts of the account profile check live in the database, not in memory: a
+// restart must not re-ask the model about every member, and an account an admin
+// vouched for must stay vouched for.
+initProfileGate(mongo.db());
 
 // Store Jev shadow-mode comparisons for offline evaluation. Defaults to the
 // database from MONGODB_URI, the only one this user is allowed to write to.
@@ -207,7 +217,18 @@ bot.use(async (ctx, next) => {
 setupPromote(bot, { myChannels, applyRankTag });
 setupUnban(bot, { myChannels });
 setupThreadRules(bot, { myChannels });
-setupModLog(bot, { myChannels });
+setupModLog(bot, {
+  myChannels,
+  // An admin pressing "Снять ограничения" overrides the profile verdict —
+  // without this the cached verdict blocks the member again on their next
+  // message, one second after the button was pressed.
+  onUnban: (_chatId, userId, adminId) => clearAccount(userId, adminId),
+});
+
+// The profile gate runs before the join gate: an account that looks like a bot
+// is blocked rather than greeted with a captcha nobody will ever press, and a
+// clean newcomer reaches the captcha with their verdict already cached.
+setupProfileGate(bot, { family: () => FAMILY });
 
 // Join gate needs to register early: its message middleware must run before
 // the content gates below (links, media), and its chat_member handler before

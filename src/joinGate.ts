@@ -1,4 +1,5 @@
 import type { Telegraf } from "telegraf";
+import { CONTENT_FIELDS } from "./helpers.ts";
 import { rulesList } from "./help.ts";
 import { blockUserUntil, deleteMessage, unbanUser } from "./lib.ts";
 import { THRESHOLDS } from "./permissions.ts";
@@ -44,27 +45,6 @@ type PendingCaptcha = {
 
 const recentJoins = new Map<string, number>();
 const pending = new Map<string, PendingCaptcha>();
-
-// A message the user actually authored; service messages like "X joined the
-// group" or "X left" carry no content and must not trigger the captcha.
-const CONTENT_FIELDS = [
-  "text",
-  "caption",
-  "photo",
-  "video",
-  "voice",
-  "audio",
-  "document",
-  "sticker",
-  "animation",
-  "video_note",
-  "poll",
-  "dice",
-  "contact",
-  "location",
-  "venue",
-  "game",
-];
 
 export function joinEvent(
   newStatus: string,

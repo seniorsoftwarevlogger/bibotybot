@@ -37,6 +37,27 @@ export function normalizeEditedMessage(ctx: {
   }
 }
 
+// A message the user actually authored; service messages like "X joined the
+// group" or "X left" carry no content and must not trigger a content gate.
+export const CONTENT_FIELDS = [
+  "text",
+  "caption",
+  "photo",
+  "video",
+  "voice",
+  "audio",
+  "document",
+  "sticker",
+  "animation",
+  "video_note",
+  "poll",
+  "dice",
+  "contact",
+  "location",
+  "venue",
+  "game",
+] as const;
+
 export function isTelegramServiceUser(user: { first_name?: string }): boolean {
   return user.first_name === "Telegram";
 }
