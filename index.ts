@@ -10,8 +10,6 @@ import {
   blockUser,
   deleteMediaMessage,
   deleteMessage,
-  deleteUserReaction,
-  muteFor24h,
   restrictReactionsFor,
   restoreUserRights,
 } from "./src/lib.ts";
@@ -22,7 +20,8 @@ import { setupUnban } from "./src/unban.ts";
 import { setupJoinGate } from "./src/joinGate.ts";
 import { setupHelp } from "./src/help.ts";
 import { initUnlocks, setupUnlocks } from "./src/unlocks.ts";
-import { notifyModAction, setupModLog } from "./src/modLog.ts";
+import { setupModLog } from "./src/modLog.ts";
+import { setupReactionGate } from "./src/reactionGate.ts";
 import { initThreadRules, setupThreadRules, threadAllows } from "./src/threadRules.ts";
 import {
   EMOJI_LIMIT,
@@ -491,117 +490,9 @@ bot.action(/del:/, async (ctx) => {
   }
 });
 
-const CLOWN_REACTION = "🤡";
-
-// Repeat early-reaction within this window escalates from "just delete" to a mute.
-const REACTION_STRIKE_WINDOW_MS = 60 * 60 * 1000;
-const reactionStrikes = new Map<string, number>();
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, expiresAt] of reactionStrikes) {
-    if (expiresAt <= now) reactionStrikes.delete(key);
-  }
-}, 10 * 60 * 1000);
-
-function isClownReaction(reaction: { type: string; emoji?: string }) {
-  return reaction.type === "emoji" && reaction.emoji === CLOWN_REACTION;
-}
-
-bot.on("message_reaction", async (ctx) => {
-  const upd = ctx.update.message_reaction;
-  const userId = upd.user?.id;
-  if (!userId) return; // anonymous channel reactions are not attributed to a user
-
-  if (upd.user?.username && FAMILY.includes(upd.user.username)) return;
-
-  const chatId = upd.chat.id;
-  const oldReactions = upd.old_reaction || [];
-  const newReactions = upd.new_reaction || [];
-
-  const hadClownReaction = oldReactions.some(isClownReaction);
-  const addedClownReaction =
-    !hadClownReaction && newReactions.some(isClownReaction);
-
-  if (addedClownReaction) {
-    console.log(
-      `Clown reaction trap: muting user ${userId} in chat ${chatId} for 24 hours`
-    );
-    await muteFor24h(ctx.telegram, chatId, userId).catch((error) => {
-      console.error(
-        `Failed to mute user ${userId} for clown reaction trap:`,
-        error
-      );
-    });
-    notifyModAction(ctx.telegram, {
-      action: "mute24h",
-      target: {
-        kind: "user",
-        id: userId,
-        first_name: upd.user?.first_name,
-        username: upd.user?.username,
-      },
-      chatId,
-      chatTitle: ctx.chat?.title,
-      reason: "🤡-реакция (клоунская ловушка)",
-    });
-    return;
-  }
-
-  // Reactions are gated behind a small message threshold to keep bot reaction
-  // farms out. First strike: silently remove the reaction. Repeat within the
-  // strike window: 24h mute on top.
-  const reactionAdded = newReactions.length > oldReactions.length;
-  if (!reactionAdded) return;
-
-  const level = await getLevel(chatId, userId);
-  if (level.canReact) return;
-
-  const messageId = upd.message_id;
-  await deleteUserReaction(ctx.telegram, chatId, messageId, userId).catch(
-    (error) => {
-      console.error(
-        `Failed to delete reaction by user ${userId} on message ${messageId}:`,
-        error
-      );
-    }
-  );
-
-  const strikeKey = `${chatId}:${userId}`;
-  const now = Date.now();
-  const previousStrike = reactionStrikes.get(strikeKey);
-  const isRepeat = previousStrike !== undefined && previousStrike > now;
-
-  if (isRepeat) {
-    console.log(
-      `Reaction gate: muting repeat offender ${userId} in chat ${chatId} (${level.messageCount}/${THRESHOLDS.react} messages)`
-    );
-    reactionStrikes.delete(strikeKey);
-    await muteFor24h(ctx.telegram, chatId, userId).catch((error) => {
-      console.error(
-        `Failed to mute user ${userId} for repeat early reaction:`,
-        error
-      );
-    });
-    notifyModAction(ctx.telegram, {
-      action: "mute24h",
-      target: {
-        kind: "user",
-        id: userId,
-        first_name: upd.user?.first_name,
-        username: upd.user?.username,
-      },
-      chatId,
-      chatTitle: ctx.chat?.title,
-      reason: `повторная ранняя реакция (${level.messageCount}/${THRESHOLDS.react} сообщений)`,
-    });
-    return;
-  }
-
-  reactionStrikes.set(strikeKey, now + REACTION_STRIKE_WINDOW_MS);
-  console.log(
-    `Reaction gate: removed reaction by ${userId} in chat ${chatId} (${level.messageCount}/${THRESHOLDS.react} messages, first strike)`
-  );
-});
+// Reactions: the clown trap, and the early-reaction gate that removes the
+// reaction and privately explains the rule instead of muting anyone.
+setupReactionGate(bot, { family: () => FAMILY });
 
 // Replicate ban across all chats
 bot.on("chat_member", async (ctx) => {

@@ -35,6 +35,7 @@ import { normalizeEditedMessage } from "../../src/helpers.ts";
 import { initPromote, rememberUser, setupPromote } from "../../src/promote.ts";
 import { setupUnban } from "../../src/unban.ts";
 import { setupJoinGate } from "../../src/joinGate.ts";
+import { setupReactionGate } from "../../src/reactionGate.ts";
 import { setupHelp } from "../../src/help.ts";
 import { initUnlocks, setupUnlocks } from "../../src/unlocks.ts";
 import { notifyModAction, setupModLog } from "../../src/modLog.ts";
@@ -114,6 +115,7 @@ beforeAll(() => server.listen({ onUnhandledRequest: "warn" }));
 afterAll(() => server.close());
 beforeEach(() => {
   capturedCalls.length = 0;
+  server.resetHandlers();
 });
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -1737,5 +1739,162 @@ describe("unlock notices", () => {
     const notices = capturedCalls.filter((c) => c.method === "sendMessage");
     expect(notices).toHaveLength(1);
     expect(notices[0].body.text).toContain("фото и видео");
+  });
+});
+
+// ── Reaction gate ─────────────────────────────────────────────────────────────
+
+describe("reaction gate", () => {
+  const REACT_USER = 11000;
+  const thumbsUp = [{ type: "emoji", emoji: "👍" }];
+  const clown = [{ type: "emoji", emoji: "🤡" }];
+
+  function buildReactionBot(messageCount: number, family: string[] = []) {
+    initPermissions(makeDbStub(messageCount));
+    const bot = new Telegraf(TOKEN);
+    bot.botInfo = {
+      id: 1,
+      is_bot: true,
+      first_name: "Bot",
+      username: "bibotybot",
+    } as any;
+    setupReactionGate(bot, { family: () => family });
+    return bot;
+  }
+
+  function reactionUpdate(
+    userId: number,
+    messageId: number,
+    newReaction: { type: string; emoji?: string }[],
+    opts: { old?: { type: string; emoji?: string }[]; username?: string } = {}
+  ) {
+    return {
+      update_id: 60,
+      message_reaction: {
+        chat: { id: CHAT_ID, type: "supergroup", title: "Test Chat" },
+        date: Math.floor(Date.now() / 1000),
+        message_id: messageId,
+        user: {
+          id: userId,
+          is_bot: false,
+          first_name: "React",
+          username: opts.username,
+        },
+        old_reaction: opts.old ?? [],
+        new_reaction: newReaction,
+      },
+    } as any;
+  }
+
+  it("removes an early reaction and explains the rule privately, with no mute", async () => {
+    const userId = REACT_USER + 1;
+    const bot = buildReactionBot(0);
+
+    await bot.handleUpdate(reactionUpdate(userId, MSG_ID, thumbsUp));
+
+    const removed = capturedCalls.find(
+      (c) => c.method === "deleteMessageReaction"
+    );
+    expect(removed?.body.message_id).toBe(MSG_ID);
+    expect(removed?.body.user_id).toBe(userId);
+
+    const notice = capturedCalls.find(
+      (c) => c.method === "sendMessage" && c.body.ephemeral_message_parameters
+    );
+    expect(notice?.body.ephemeral_message_parameters).toEqual({
+      receiver_user_id: userId,
+    });
+    expect(notice?.body.text).toContain(`после ${THRESHOLDS.react} сообщений`);
+    expect(notice?.body.text).toContain("/rules");
+
+    // Nobody is muted and nothing reaches the mod log — there is nothing to lift.
+    expect(calledMethods()).not.toContain("restrictChatMember");
+  });
+
+  it("keeps removing early reactions but repeats the notice at most once an hour", async () => {
+    const userId = REACT_USER + 2;
+    const bot = buildReactionBot(0);
+
+    await bot.handleUpdate(reactionUpdate(userId, MSG_ID, thumbsUp));
+    capturedCalls.length = 0;
+
+    await bot.handleUpdate(reactionUpdate(userId, MSG_ID + 1, thumbsUp));
+
+    expect(calledMethods()).toContain("deleteMessageReaction");
+    expect(calledMethods()).not.toContain("sendMessage");
+    expect(calledMethods()).not.toContain("restrictChatMember");
+  });
+
+  it("tries the notice again when the first delivery fails", async () => {
+    const userId = REACT_USER + 7;
+    const bot = buildReactionBot(0);
+
+    server.use(
+      http.post(`https://api.telegram.org/bot${TOKEN}/sendMessage`, () =>
+        HttpResponse.json({
+          ok: false,
+          error_code: 400,
+          description: "Bad Request: message failed",
+        })
+      )
+    );
+    await bot.handleUpdate(reactionUpdate(userId, MSG_ID, thumbsUp));
+    server.resetHandlers();
+    capturedCalls.length = 0;
+
+    await bot.handleUpdate(reactionUpdate(userId, MSG_ID + 1, thumbsUp));
+
+    const notice = capturedCalls.find(
+      (c) => c.method === "sendMessage" && c.body.ephemeral_message_parameters
+    );
+    expect(notice?.body.ephemeral_message_parameters).toEqual({
+      receiver_user_id: userId,
+    });
+  });
+
+  it("leaves a member who earned reactions alone", async () => {
+    const userId = REACT_USER + 3;
+    const bot = buildReactionBot(THRESHOLDS.react);
+
+    await bot.handleUpdate(reactionUpdate(userId, MSG_ID, thumbsUp));
+
+    expect(capturedCalls).toEqual([]);
+  });
+
+  it("ignores a reaction the member already had", async () => {
+    const userId = REACT_USER + 4;
+    const bot = buildReactionBot(0);
+
+    await bot.handleUpdate(
+      reactionUpdate(userId, MSG_ID, thumbsUp, { old: thumbsUp })
+    );
+
+    expect(capturedCalls).toEqual([]);
+  });
+
+  it("ignores the family", async () => {
+    const userId = REACT_USER + 5;
+    const bot = buildReactionBot(0, ["family_guy"]);
+
+    await bot.handleUpdate(
+      reactionUpdate(userId, MSG_ID, thumbsUp, { username: "family_guy" })
+    );
+
+    expect(capturedCalls).toEqual([]);
+  });
+
+  it("still mutes for the clown trap, even for a member who may react", async () => {
+    const userId = REACT_USER + 6;
+    const bot = buildReactionBot(THRESHOLDS.react);
+
+    await bot.handleUpdate(reactionUpdate(userId, MSG_ID, clown));
+
+    const mute = capturedCalls.find((c) => c.method === "restrictChatMember");
+    expect(mute?.body.user_id).toBe(userId);
+    expect(mute?.body.permissions.can_send_messages).toBe(false);
+    expect(mute?.body.until_date).toBeGreaterThan(
+      Math.floor(Date.now() / 1000)
+    );
+    expect(calledMethods()).not.toContain("deleteMessageReaction");
   });
 });
