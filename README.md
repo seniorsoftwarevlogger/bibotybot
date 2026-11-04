@@ -61,7 +61,7 @@ npm run jev -- "текст сообщения"
 
 4. **Ban Replication**: when an admin bans a member in one of the managed chats (via the Telegram UI), the ban is automatically replicated to the other managed chats.
 
-5. **Ephemeral removal notices**: When the bot removes a user's message (spam, links, media, etc.), it tells that user *why* using a Telegram [ephemeral message](https://core.telegram.org/bots/features#ephemeral-messages) — a group message addressed to a single member via `receiver_user_id` that only they can see. This keeps the chat clean (no public "message deleted" warnings) while still notifying the offender privately. Requires a Bot API server that supports ephemeral messages (Bot API 10.2+); delivery is best-effort and failures are logged, not fatal.
+5. **Ephemeral removal notices**: When the bot removes a user's message (spam, links, media, etc.), it tells that user *why* using a Telegram [ephemeral message](https://core.telegram.org/bots/features#ephemeral-messages) — a group message addressed to a single member via `ephemeral_message_parameters` that only they can see. This keeps the chat clean (no public "message deleted" warnings) while still notifying the offender privately. The shape matters: Bot API 10.3 replaced the top-level `receiver_user_id` parameter with the `ephemeral_message_parameters` object, and sending the retired form risks the notice being delivered to the whole chat instead of one member. Delivery is best-effort and failures are logged, not fatal.
 
    > Note: the Telegram Bot API does not deliver an update when a regular user deletes their *own* message in a group, so the notice is tied to the bot's own removals rather than user self-deletions.
 

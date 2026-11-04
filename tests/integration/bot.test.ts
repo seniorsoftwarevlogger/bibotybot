@@ -275,9 +275,11 @@ describe("spam filter", () => {
     expect(copy?.body.message_id).toBe(MSG_ID);
 
     // The "why it was removed" notice goes out as an ephemeral message that only
-    // the offending user can see, addressed via receiver_user_id.
+    // the offending user can see, addressed via ephemeral_message_parameters.
     const notice = capturedCalls.find((c) => c.method === "sendMessage");
-    expect(notice?.body.receiver_user_id).toBe(userId);
+    expect(notice?.body.ephemeral_message_parameters?.receiver_user_id).toBe(
+      userId
+    );
     expect(notice?.body.text).toBe("Spam removed.");
   });
 
@@ -307,7 +309,9 @@ describe("link filter", () => {
     expect(calledMethods()).toContain("deleteMessage");
 
     const notice = capturedCalls.find((c) => c.method === "sendMessage");
-    expect(notice?.body.receiver_user_id).toBe(userId);
+    expect(notice?.body.ephemeral_message_parameters?.receiver_user_id).toBe(
+      userId
+    );
     expect(notice?.body.text).toBe("No links for you.");
   });
 
@@ -357,7 +361,9 @@ describe("custom-emoji flood filter", () => {
     expect(calledMethods()).toContain("deleteMessage");
 
     const notice = capturedCalls.find((c) => c.method === "sendMessage");
-    expect(notice?.body.receiver_user_id).toBe(userId);
+    expect(notice?.body.ephemeral_message_parameters?.receiver_user_id).toBe(
+      userId
+    );
     expect(notice?.body.text).toContain("Правила чата");
 
     const restrict = capturedCalls.find(
@@ -423,7 +429,9 @@ describe("media filter", () => {
     // The removal notice is ephemeral: only the user who posted the media sees it,
     // so the group is not spammed with a public warning.
     const notice = capturedCalls.find((c) => c.method === "sendMessage");
-    expect(notice?.body.receiver_user_id).toBe(userId);
+    expect(notice?.body.ephemeral_message_parameters?.receiver_user_id).toBe(
+      userId
+    );
   });
 
   it("allows a photo from a user who reached the media threshold", async () => {
@@ -877,7 +885,9 @@ describe("join gate", () => {
 
     // The only thing the member sees is the ephemeral spam notice.
     const notice = capturedCalls.find(
-      (c) => c.method === "sendMessage" && c.body.receiver_user_id === userId
+      (c) =>
+        c.method === "sendMessage" &&
+        c.body.ephemeral_message_parameters?.receiver_user_id === userId
     );
     expect(notice?.body.text).toContain("спам");
   });
@@ -922,7 +932,9 @@ describe("join gate", () => {
     expect(restrict?.body.user_id).toBe(userId);
     expect(restrict?.body.until_date).toBeUndefined();
     const notice = capturedCalls.find(
-      (c) => c.method === "sendMessage" && c.body.receiver_user_id === userId
+      (c) =>
+        c.method === "sendMessage" &&
+        c.body.ephemeral_message_parameters?.receiver_user_id === userId
     );
     expect(notice?.body.text).toContain("спам");
 
@@ -1686,7 +1698,9 @@ describe("unlock notices", () => {
 
     const notice = capturedCalls.find((c) => c.method === "sendMessage");
     expect(notice?.body.chat_id).toBe(CHAT_ID);
-    expect(notice?.body.receiver_user_id).toBe(MEMBER_ID);
+    expect(
+      notice?.body.ephemeral_message_parameters?.receiver_user_id
+    ).toBe(MEMBER_ID);
     expect(notice?.body.text).toContain("ссылки");
     expect(notice?.body.text).toContain("реакции");
     expect(notice?.body.text).not.toContain("фото и видео");

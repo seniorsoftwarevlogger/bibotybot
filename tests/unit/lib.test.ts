@@ -5,7 +5,7 @@ import {
 } from "../../src/lib.ts";
 
 describe("sendEphemeralMessage", () => {
-  it("posts via sendMessage addressed to a single user with receiver_user_id", async () => {
+  it("posts via sendMessage addressed to a single user", async () => {
     const telegram = { sendMessage: vi.fn().mockResolvedValue({ message_id: 1 }) };
 
     await sendEphemeralMessage(telegram, -1001234567890, 42, "Сообщение удалено");
@@ -13,7 +13,9 @@ describe("sendEphemeralMessage", () => {
     expect(telegram.sendMessage).toHaveBeenCalledWith(
       -1001234567890,
       "Сообщение удалено",
-      expect.objectContaining({ receiver_user_id: 42 })
+      expect.objectContaining({
+        ephemeral_message_parameters: { receiver_user_id: 42 },
+      })
     );
   });
 
@@ -23,7 +25,10 @@ describe("sendEphemeralMessage", () => {
     await sendEphemeralMessage(telegram, -100, 7, "hi", { parse_mode: "HTML" });
 
     const [, , extra] = telegram.sendMessage.mock.calls[0];
-    expect(extra.receiver_user_id).toBe(7);
+    expect(extra.ephemeral_message_parameters).toEqual({ receiver_user_id: 7 });
+    // Bot API 10.3 replaced the top-level parameter; if it is still sent, the
+    // notice stops being private and lands in front of the whole chat.
+    expect(extra.receiver_user_id).toBeUndefined();
     expect(extra.link_preview_options).toEqual({ is_disabled: true });
     expect(extra.parse_mode).toBe("HTML");
   });
