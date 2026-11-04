@@ -69,7 +69,9 @@ describe("announceUnlocks", () => {
     const [chatId, text, extra] = telegram.sendMessage.mock.calls[0];
     expect(chatId).toBe(CHAT_ID);
     expect(text).toContain("ссылки");
-    expect(extra.receiver_user_id).toBe(userId);
+    expect(extra.ephemeral_message_parameters).toEqual({
+      receiver_user_id: userId,
+    });
     expect(collection.updateOne).toHaveBeenCalledWith(
       { chat_id: CHAT_ID, user_id: userId },
       expect.objectContaining({

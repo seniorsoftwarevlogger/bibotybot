@@ -128,14 +128,16 @@ export async function unbanUser(
   return "restored";
 }
 
-// Ephemeral messages (Bot API 10.2): a group/supergroup message that is visible
-// only to the single member named by `receiver_user_id` — nobody else in the chat
+// Ephemeral messages: a group/supergroup message that is visible only to the
+// single member named in `ephemeral_message_parameters` — nobody else in the chat
 // sees it. We use them to privately tell a user why their message was removed,
 // instead of announcing the deletion to everyone with a public (then auto-deleted)
-// warning. Telegraf 4.16.3 has no typed support for `receiver_user_id` yet, but it
-// forwards unknown fields from the extra options object straight to the Bot API,
-// so we pass it through there. Delivery is best-effort — Telegram may skip it when
-// the recipient is offline — so callers treat a rejection as non-fatal.
+// warning. Bot API 10.3 replaced the top-level `receiver_user_id` and
+// `callback_query_id` parameters with this object. Telegraf 4.16.3 has no typed
+// support for it, but it forwards unknown fields from the extra options object
+// straight to the Bot API, so we pass it through there. Delivery is best-effort —
+// Telegram may skip it when the recipient is offline — so callers treat a
+// rejection as non-fatal.
 export function sendEphemeralMessage(
   telegram,
   chatId,
@@ -144,7 +146,7 @@ export function sendEphemeralMessage(
   extra: Record<string, unknown> = {}
 ) {
   return telegram.sendMessage(chatId, text, {
-    receiver_user_id: userId,
+    ephemeral_message_parameters: { receiver_user_id: userId },
     link_preview_options: { is_disabled: true },
     ...extra,
   });
