@@ -946,6 +946,12 @@ describe("join gate", () => {
       .flatMap((c) => (c.body.reply_markup as any).inline_keyboard.flat())
       .filter((b: any) => String(b.callback_data ?? "").startsWith("joingate:"));
     expect(gateButtons).toEqual([]);
+
+    // The already published captcha is useless once the sender is blocked.
+    expect(capturedCalls).toContainEqual({
+      method: "deleteMessage",
+      body: { chat_id: CHAT_ID, message_id: 998 },
+    });
   });
 
   it("passing the captcha restores permissions and lifts the gate", async () => {
