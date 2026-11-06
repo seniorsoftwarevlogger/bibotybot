@@ -188,7 +188,13 @@ export function setupJoinGate(
       // too, without another reply. A member who can still post here usually
       // means the restriction never landed, so the spam check has to run:
       // quarantining spam silently would leave the sender unblocked.
-      if (spamCheck && message.text && (await spamCheck(ctx))) return;
+      if (spamCheck && message.text && (await spamCheck(ctx))) {
+        dropPending(chatId, userId);
+        await ctx.telegram
+          .deleteMessage(activeCaptcha.chatId, activeCaptcha.captchaMessageId)
+          .catch(() => {});
+        return;
+      }
       await deleteMessage(ctx, null, { mute: false });
       return;
     }
